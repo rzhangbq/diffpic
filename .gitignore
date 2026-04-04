@@ -2,3 +2,4 @@
 *.mp4
 *.png
 model_checkpoint_*
+.DS_Store

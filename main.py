@@ -268,7 +268,8 @@ def run_resp(args) -> None:
 
     n_mode = 3
     m_mode = 5
-    amp = pick(args.resp_amp, 1e5)
+    # Keep response forcing on a scale comparable to trained open-loop control.
+    amp = pick(args.resp_amp, 1.0)
     phase = 0.0
     e_control = FourierActuator(
         Nt=pic.n_steps,

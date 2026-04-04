@@ -44,7 +44,7 @@ Example baseline (shared across all modes):
 COMMON="--seed-ic 10 --t1 20 --dt 0.1 --n-particles 40000 --n-mesh 256 --boxsize 31.4159265359 --n0 1 --vb 2.4 --vth 0.5 --eval-mult 2"
 TRAIN_COMMON="--train-steps 200 --save-every 100 --train-seed 0"
 
-python main.py resp $COMMON --resp-amp 100000
+python main.py resp $COMMON --resp-amp 1.0
 python main.py zir $COMMON
 python main.py opt $COMMON $TRAIN_COMMON --seed-ic-eval 10
 python main.py opt_cl $COMMON $TRAIN_COMMON --seed-ic-eval 10
