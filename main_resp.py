@@ -1,7 +1,8 @@
 import jax
 import jax.numpy as jnp
+import equinox as eqx
 from pic_simulation import PICSimulation
-from control import FourierActuator, build_rfftn_modes_single
+from control import FourierActuator
 from plotting import scatter_animation, plot_pde_solution, plot_modes
 
 # Simulation parameters
@@ -34,15 +35,32 @@ vel = vel.at[Nh:].set(-1*vel[Nh:])
 
 y0 = (pos, vel)
 
-pic = PICSimulation(boxsize, N_particles, N_mesh, n0, dt, t1, t0=0, higher_moments=True)
+pic = PICSimulation(boxsize, N_particles, N_mesh, n0, vb, vth, dt, t1, t0=0, higher_moments=True)
 
-modes = build_rfftn_modes_single(pic.n_steps, pic.N_mesh, n=3, m=5, A=1e5, phi_t=0.0, phi_x=0.0)
+# Build a deterministic open-loop response field with a single (time,space) mode.
+n_mode = 3
+m_mode = 5
+amp = 1e5
+phase = 0.0
+E_control = FourierActuator(
+    Nt=pic.n_steps,
+    N_mesh=pic.N_mesh,
+    boxsize=pic.boxsize,
+    n_modes_time=n_mode + 1,
+    n_modes_space=m_mode + 1,
+    key=None,
+    init_scale=0.0,
+    zero=False,
+    closed_loop=False,
+)
 
-E_control = FourierActuator(pic.n_steps,pic.N_mesh,modes=modes)
+coeff = (amp / 2.0) * jnp.exp(1j * phase)
+a_hat = E_control.a_hat_train.at[m_mode, n_mode].set(jnp.asarray(coeff, dtype=jnp.complex64))
+E_control = eqx.tree_at(lambda m: m.a_hat_train, E_control, a_hat)
 
 pic = pic.run_simulation(y0,E_control=E_control)
 
-u = jax.vmap(E_control)(pic.ts)
+u = jax.vmap(E_control)(jnp.arange(pic.ts.shape[0]))
 
 print("E_control shape: ", u.shape)
 
