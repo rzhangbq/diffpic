@@ -1,0 +1,4 @@
+*.pyc
+*.mp4
+*.png
+model_checkpoint_*
