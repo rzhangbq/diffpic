@@ -110,7 +110,10 @@ class Optimizer():
             E_ext = None
         else:
             if model.closed_loop:
-                E_ext = model(jnp.asarray(0), state=jnp.fft.rfft(moments[:, 1]))
+                E_ext = model(
+                    jnp.asarray(0),
+                    state=(jnp.fft.rfft(moments[:, 0]), jnp.fft.rfft(moments[:, 1])),
+                )
             else:
                 E_ext = model(jnp.asarray(0))
 

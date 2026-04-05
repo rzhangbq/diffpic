@@ -495,6 +495,7 @@ def run_opt_cl(args) -> None:
         init_scale=0.0,
         u_max=None,
         include_dc=False,
+        include_density_input=True,
         closed_loop=True,
         key=jax.random.PRNGKey(9),
     )
@@ -522,8 +523,12 @@ def run_opt_cl(args) -> None:
     y0_eval = pic_eval.create_y0(jax.random.key(pick(args.seed_ic_eval, 1024)))
     pic_eval = pic_eval.run_simulation(y0_eval, E_control=e_control)
 
-    e_control_vmappable = lambda n, x: e_control(n, state=x)
-    u = jax.vmap(e_control_vmappable, in_axes=(0, 0))(jnp.arange(pic_eval.ts.shape[0]), jnp.fft.rfft(pic_eval.rho))
+    e_control_vmappable = lambda n, rho_hat, mom_hat: e_control(n, state=(rho_hat, mom_hat))
+    u = jax.vmap(e_control_vmappable, in_axes=(0, 0, 0))(
+        jnp.arange(pic_eval.ts.shape[0]),
+        jnp.fft.rfft(pic_eval.rho),
+        jnp.fft.rfft(pic_eval.momentum),
+    )
 
     state_modes = {
         "rho": {"max_mode_spect": 100, "max_mode_time": 5, "num": 6},
@@ -623,8 +628,12 @@ def run_load_cl(args) -> None:
     y0 = pic.create_y0(jax.random.key(pick(args.seed_ic, 234)))
     pic = pic.run_simulation(y0, E_control=e_control)
 
-    e_control_vmappable = lambda n, x: e_control(n, state=x)
-    u = jax.vmap(e_control_vmappable, in_axes=(0, 0))(jnp.arange(pic.ts.shape[0]), jnp.fft.rfft(pic.rho))
+    e_control_vmappable = lambda n, rho_hat, mom_hat: e_control(n, state=(rho_hat, mom_hat))
+    u = jax.vmap(e_control_vmappable, in_axes=(0, 0, 0))(
+        jnp.arange(pic.ts.shape[0]),
+        jnp.fft.rfft(pic.rho),
+        jnp.fft.rfft(pic.momentum),
+    )
 
     state_modes = {
         "rho": {"max_mode_spect": 100, "max_mode_time": 5, "num": 6},

@@ -277,7 +277,10 @@ class PICSimulation(eqx.Module):
             E_ext = None
         else:
             if E_control.closed_loop:
-                E_ext = E_control(n, state=jnp.fft.rfft(moments[:,1]))
+                E_ext = E_control(
+                    n,
+                    state=(jnp.fft.rfft(moments[:, 0]), jnp.fft.rfft(moments[:, 1])),
+                )
             else:
                 E_ext = E_control(n)
 
@@ -304,7 +307,10 @@ class PICSimulation(eqx.Module):
             E_ext = None
         else:
             if E_control.closed_loop:
-                E_ext = E_control(jnp.asarray(0), state=jnp.fft.rfft(moments[:,1]))
+                E_ext = E_control(
+                    jnp.asarray(0),
+                    state=(jnp.fft.rfft(moments[:, 0]), jnp.fft.rfft(moments[:, 1])),
+                )
             else:
                 E_ext = E_control(jnp.asarray(0))
 

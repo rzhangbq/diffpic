@@ -253,6 +253,7 @@ class ModeFeedbackActuator(eqx.Module):
 
     use_linear: bool = eqx.field(static=True)
     include_dc: bool = eqx.field(static=True)
+    include_density_input: bool = eqx.field(static=True)
     u_max: float | None = eqx.field(static=True)
 
     zero: bool = eqx.field(static=True)
@@ -265,10 +266,11 @@ class ModeFeedbackActuator(eqx.Module):
     K0: jax.Array | None           # (n_out, n_in) complex64 if linear
     dc_value: jax.Array | None     # (1,) float if include_dc else None
 
-    def __init__(self,N_mesh,boxsize,use_linear=False,width=64,depth=2,include_dc=False,u_max=None,zero=False,closed_loop=True,n_modes_space_in=4,n_modes_space_out=4,init_scale=1.0,*,key):
+    def __init__(self,N_mesh,boxsize,use_linear=False,width=64,depth=2,include_dc=False,include_density_input=False,u_max=None,zero=False,closed_loop=True,n_modes_space_in=4,n_modes_space_out=4,init_scale=1.0,*,key):
         self.N_mesh = N_mesh
         self.boxsize = boxsize
         self.include_dc = include_dc
+        self.include_density_input = include_density_input
         self.u_max = u_max
         self.zero = zero
         self.closed_loop = closed_loop
@@ -278,10 +280,11 @@ class ModeFeedbackActuator(eqx.Module):
         self.use_linear = use_linear
         self.width = width
         self.depth = depth
+        n_input_states = 2 if self.include_density_input else 1
 
         if self.use_linear:
             k1, k2, k3 = jax.random.split(key, num=3)
-            shape = (self.n_modes_space_out,self.n_modes_space_in)
+            shape = (self.n_modes_space_out, n_input_states * self.n_modes_space_in)
             self.K0 = self.init_scale * (
                     jax.random.normal(k1, shape, dtype=jnp.float64)
                     + 1j * jax.random.normal(k2, shape, dtype=jnp.float64)
@@ -295,10 +298,9 @@ class ModeFeedbackActuator(eqx.Module):
         else:
             self.K0 = None
             self.dc_value = None
-            in_size = 2*self.n_modes_space_in
+            in_size = n_input_states * (2 * self.n_modes_space_in + (1 if self.include_dc else 0))
             out_size = 2*self.n_modes_space_out
-            if self.include_dc: 
-                in_size += 1
+            if self.include_dc:
                 out_size += 1
             self.mlp = eqx.nn.MLP(
                 in_size=in_size,
@@ -316,8 +318,9 @@ class ModeFeedbackActuator(eqx.Module):
         ----------
         n : int
             time-step index (kept for interface compatibility; not used here).
-        state : complex array, shape (N_mesh//2+1,)
-            One-sided rFFT coefficients of state(x) at current step.
+        state : complex array or tuple(complex array, complex array)
+            One-sided rFFT coefficients at current step. When tuple, expects
+            (density_spectrum, first_moment_spectrum).
 \
         Returns
         -------
@@ -327,8 +330,45 @@ class ModeFeedbackActuator(eqx.Module):
         if self.zero:
             return jnp.zeros((self.N_mesh,), dtype=jnp.float32)
 
+        rho_state = None
+        mom_state = state
+        if isinstance(state, tuple):
+            if len(state) != 2:
+                raise ValueError("If tuple state is provided, expected (density, first_moment).")
+            rho_state, mom_state = state
+        if mom_state is None:
+            raise ValueError("closed_loop actuator requires `state` input.")
+        if self.include_density_input and rho_state is None:
+            raise ValueError(
+                "include_density_input=True requires tuple state=(density_spectrum, first_moment_spectrum)."
+            )
+
+        def _encode_observed_modes(spec):
+            s = spec[: self.n_modes_space_in + 1]
+            if self.include_dc:
+                return jnp.concatenate(
+                    [
+                        jnp.array([jnp.real(s[0])], dtype=jnp.float64),
+                        jnp.real(s[1:]).astype(jnp.float64),
+                        jnp.imag(s[1:]).astype(jnp.float64),
+                    ],
+                    axis=0,
+                )
+            return jnp.concatenate(
+                [
+                    jnp.real(s[1:]).astype(jnp.float64),
+                    jnp.imag(s[1:]).astype(jnp.float64),
+                ],
+                axis=0,
+            )
+
         if self.use_linear:
-            meas = state[1:self.n_modes_space_in+1]
+            mom_meas = mom_state[1 : self.n_modes_space_in + 1]
+            if self.include_density_input:
+                rho_meas = rho_state[1 : self.n_modes_space_in + 1]
+                meas = jnp.concatenate([rho_meas, mom_meas], axis=0)
+            else:
+                meas = mom_meas
 
             # Feedback in Fourier domain: u_m = -K * meas
             u_m = (-self.K0) @ meas
@@ -349,14 +389,9 @@ class ModeFeedbackActuator(eqx.Module):
             if self.mlp is None:
                 raise ValueError("use_linear=False but mlp is None.")
 
-            # Take the modes you want as input
-            s = state[: self.n_modes_space_in + 1]              # includes DC
-            if not self.include_dc:
-                s = s[1:]                                       # drop DC -> (n_in,)
-
-            x = jnp.concatenate([jnp.real(s), jnp.imag(s)], axis=0)  # (2*n_in,) real
-            if self.include_dc:
-                x = jnp.concatenate([jnp.array([jnp.real(state[0])], dtype=x.dtype), x], axis=0)
+            x = _encode_observed_modes(mom_state)
+            if self.include_density_input:
+                x = jnp.concatenate([_encode_observed_modes(rho_state), x], axis=0)
 
             u_m = self.mlp(x)  # (2*n_out [+1]) real
 
@@ -390,6 +425,7 @@ class ModeFeedbackActuator(eqx.Module):
                 "n_modes_space_out": int(self.n_modes_space_out),
                 "init_scale": float(self.init_scale),
                 "include_dc": bool(self.include_dc),
+                "include_density_input": bool(self.include_density_input),
                 "use_linear": bool(self.use_linear),
                 "u_max": float(self.u_max) if self.u_max is not None else None,
             }
@@ -410,6 +446,7 @@ class ModeFeedbackActuator(eqx.Module):
                 width=hyperparams.get("width", 64),
                 depth=hyperparams.get("depth", 2),
                 include_dc=hyperparams.get("include_dc", False),
+                include_density_input=hyperparams.get("include_density_input", False),
                 u_max=hyperparams.get("u_max", None),
                 zero=hyperparams.get("zero", False),
                 closed_loop=hyperparams.get("closed_loop", True),
