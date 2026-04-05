@@ -34,6 +34,21 @@ def loss_metric_density_modes(pic, *, modes=(1,2), tail_frac=0.25, lam_tail=0.7,
 
     return (1.0 - lam_tail) * mode_energy_t.mean() + lam_tail * tail.mean()
 
+
+def loss_metric_cancel_self_field(pic):
+    """
+    Direct supervised control target:
+      E_ext(t, x) ~= -E_self(t, x)
+
+    This is an overfit-style diagnostic for controller capacity. If the controller
+    can represent the mapping from observed state -> cancelling field, then
+    mean((E_ext + E_self)^2) should approach zero on the training trajectory.
+    """
+    if getattr(pic, "E_ext", None) is None:
+        raise ValueError("loss_metric_cancel_self_field requires controlled simulation with E_ext.")
+    residual = pic.E_ext - (-pic.E_field)
+    return jnp.mean(residual**2)
+
 def _smoothmax(x, beta=30.0, eps=1e-12):
     # stable log-mean-exp
     x0 = jnp.max(x)

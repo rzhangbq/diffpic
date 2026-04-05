@@ -50,6 +50,7 @@ class Optimizer():
                        num_ics=10,
                        y0=None,
                        lr=1e-4,
+                       lr_final=None,
                        optim=None,
                        save_dir="model/", 
                        save_name="model_checkpoint",
@@ -88,16 +89,38 @@ class Optimizer():
         self.loss = lambda model, y0: self.loss_function(model, y0, **loss_kwargs) # Same signature as L2_loss, but different implementation
         self.grad_loss = eqx.filter_value_and_grad(self.loss) # Do NOT mutate loss after this point, it is jitted already
         self.base_lr = float(lr)
+        self.base_lr_final = float(lr_final) if lr_final is not None else None
         # Fair-play scaling: keep trajectory budget fixed while compensating for fewer
         # optimizer updates under batched trajectories.
         self.lr = self.base_lr * float(self.batch_size)
-        if optim is None:
+        self.lr_final = (
+            self.base_lr_final * float(self.batch_size)
+            if self.base_lr_final is not None
+            else None
+        )
+        if self.lr_final is not None and self.lr_final <= 0.0:
+            raise ValueError("lr_final must be positive when provided.")
+        self.optim_builder = optim
+        if self.optim_builder is None:
             self.optim = optax.adam(self.lr)
         else:
-            self.optim = optim(self.lr) # if you want to modify other parameters, prepass through a lambda (TODO: ugly, fix later)
+            self.optim = self.optim_builder(self.lr) # if you want to modify other parameters, prepass through a lambda (TODO: ugly, fix later)
 
         self.save_dir = save_dir
         self.save_name = save_name
+
+    def _build_optimizer(self, total_updates=None):
+        lr_or_schedule = self.lr
+        if self.lr_final is not None and total_updates is not None and total_updates > 1:
+            alpha = self.lr_final / self.lr
+            lr_or_schedule = optax.cosine_decay_schedule(
+                init_value=self.lr,
+                decay_steps=max(int(total_updates) - 1, 1),
+                alpha=float(alpha),
+            )
+        if self.optim_builder is None:
+            return optax.adam(lr_or_schedule)
+        return self.optim_builder(lr_or_schedule)
 
     def _init_scan_state(self, y0, model):
         pos, vel = y0
@@ -202,7 +225,10 @@ class Optimizer():
         return loss, model, opt_state
 
     def train(self, n_steps, save_every=100, seed=0, print_status=True):
-        make_step = eqx.filter_jit(self.make_step) # Do NOT mutate anything inside self.make_step from this point on, it is jitted already    
+        total_trajectories = int(n_steps)
+        total_updates = int(np.ceil(total_trajectories / self.batch_size))
+        self.optim = self._build_optimizer(total_updates=total_updates)
+        make_step = eqx.filter_jit(self.make_step) # Do NOT mutate anything inside self.make_step from this point on, it is jitted already
 
         make_dir(self.save_dir)
 
@@ -215,7 +241,6 @@ class Optimizer():
         ic_keys = jax.random.split(ic_key, self.num_ics)
         y0_pool = jax.vmap(self.pic.create_y0)(ic_keys)
 
-        total_trajectories = int(n_steps)
         trajectories_done = 0
         step = 0
         while trajectories_done < total_trajectories:

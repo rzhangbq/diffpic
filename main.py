@@ -9,7 +9,12 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 
 from control import DissipativeModeFeedbackActuator, FourierActuator, ModeFeedbackActuator
-from losses import loss_metric, loss_metric_density_modes, loss_metric_stable
+from losses import (
+    loss_metric,
+    loss_metric_cancel_self_field,
+    loss_metric_density_modes,
+    loss_metric_stable,
+)
 from optimize import Optimizer
 from pic_simulation import PICSimulation
 from plotting import plot_modes, plot_pde_solution, scatter_animation
@@ -166,6 +171,14 @@ def save_common_plots(
     )
     plot_pde_solution(
         pic.ts,
+        pic.E_field,
+        boxsize,
+        name=r"Self-generated field",
+        label=r"$E_{self}$",
+        save_path=f"{out_dir}/self_field.png",
+    )
+    plot_pde_solution(
+        pic.ts,
         pic.rho,
         boxsize,
         name=r"Density",
@@ -203,6 +216,21 @@ def save_common_plots(
             save_path=f"{out_dir}/external_field_modes.png",
         )
 
+    self_field_modes_cfg = base_modes.get("e_field", base_modes.get("rho"))
+    if self_field_modes_cfg is not None:
+        plot_modes(
+            pic.ts,
+            pic.E_field,
+            max_mode_spect=self_field_modes_cfg["max_mode_spect"],
+            max_mode_time=self_field_modes_cfg["max_mode_time"],
+            boxsize=boxsize,
+            name=r"Self-generated field",
+            label=r"$\hat E_{self}$",
+            num=self_field_modes_cfg["num"],
+            zero_mean=True,
+            save_path=f"{out_dir}/self_field_modes.png",
+        )
+
     for field, label, name in [
         ("rho", r"$\hat\rho_k$", r"Density"),
         ("momentum", r"$\hat\mathcal{{p}}_k$", r"Momentum"),
@@ -236,6 +264,14 @@ def save_state_only_plots(pic: PICSimulation, *, boxsize, nh: int, out_dir: str,
         save_path=f"{out_dir}/scatter.mp4",
     )
 
+    plot_pde_solution(
+        pic.ts,
+        pic.E_field,
+        boxsize,
+        name=r"Self-generated field",
+        label=r"$E_{self}$",
+        save_path=f"{out_dir}/self_field.png",
+    )
     plot_pde_solution(
         pic.ts,
         pic.rho,
@@ -279,6 +315,21 @@ def save_state_only_plots(pic: PICSimulation, *, boxsize, nh: int, out_dir: str,
             num=cfg["num"],
             zero_mean=True,
             save_path=f"{out_dir}/{field}_modes.png",
+        )
+
+    self_field_modes_cfg = base_modes.get("e_field", base_modes.get("rho"))
+    if self_field_modes_cfg is not None:
+        plot_modes(
+            pic.ts,
+            pic.E_field,
+            max_mode_spect=self_field_modes_cfg["max_mode_spect"],
+            max_mode_time=self_field_modes_cfg["max_mode_time"],
+            boxsize=boxsize,
+            name=r"Self-generated field",
+            label=r"$\hat E_{self}$",
+            num=self_field_modes_cfg["num"],
+            zero_mean=True,
+            save_path=f"{out_dir}/self_field_modes.png",
         )
 
 
@@ -388,6 +439,8 @@ def run_opt(args) -> None:
     tbptt_k = args.tbptt_k
     tbptt_s = args.tbptt_s
     tbptt_b = pick(args.tbptt_b, 1)
+    lr_start = pick(args.lr_start, 5e-2)
+    lr_end = pick(args.lr_end, 1e-3)
     pic = make_pic(cfg, cfg["t1"])
 
     e_control = FourierActuator(
@@ -409,7 +462,8 @@ def run_opt(args) -> None:
         K=None,
         y0=y0,
         loss_metric=loss_metric,
-        lr=1e-2,
+        lr=lr_start / tbptt_b,
+        lr_final=lr_end / tbptt_b,
         save_dir=f"{model_dir}/",
         tbptt_k=tbptt_k,
         tbptt_s=tbptt_s,
@@ -448,7 +502,14 @@ def run_opt(args) -> None:
         "run_id": run_id,
         "args": vars(args),
         "cfg": cfg,
-        "train": {"train_steps": train_steps, "save_every": save_every, "train_seed": train_seed, "num_ics": num_ics},
+        "train": {
+            "train_steps": train_steps,
+            "save_every": save_every,
+            "train_seed": train_seed,
+            "num_ics": num_ics,
+            "lr_start": lr_start,
+            "lr_end": lr_end,
+        },
         "eval": {"eval_mult": eval_mult, "seed_ic_eval": pick(args.seed_ic_eval, seed_ic)},
         "tbptt": {"K": tbptt_k, "S": tbptt_s, "B": tbptt_b},
         "outputs": {"plot_dir": str(plot_dir), "model_dir": str(model_dir), "checkpoint": checkpoint_path},
@@ -482,6 +543,8 @@ def run_opt_cl(args) -> None:
     tbptt_k = args.tbptt_k
     tbptt_s = args.tbptt_s
     tbptt_b = pick(args.tbptt_b, 4)
+    lr_start = pick(args.lr_start, 5e-2)
+    lr_end = pick(args.lr_end, 1e-3)
     pic = make_pic(cfg, cfg["t1"])
 
     e_control = ModeFeedbackActuator(
@@ -506,7 +569,8 @@ def run_opt_cl(args) -> None:
         model=e_control,
         y0=y0,
         loss_metric=loss_metric_density_modes,
-        lr=1e-2,
+        lr=lr_start / tbptt_b,
+        lr_final=lr_end / tbptt_b,
         save_dir=f"{model_dir}/",
         tbptt_k=tbptt_k,
         tbptt_s=tbptt_s,
@@ -552,7 +616,138 @@ def run_opt_cl(args) -> None:
         "run_id": run_id,
         "args": vars(args),
         "cfg": cfg,
-        "train": {"train_steps": train_steps, "save_every": save_every, "train_seed": train_seed, "num_ics": num_ics},
+        "train": {
+            "train_steps": train_steps,
+            "save_every": save_every,
+            "train_seed": train_seed,
+            "num_ics": num_ics,
+            "lr_start": lr_start,
+            "lr_end": lr_end,
+        },
+        "eval": {"eval_mult": eval_mult, "seed_ic_eval": pick(args.seed_ic_eval, 1024)},
+        "tbptt": {"K": tbptt_k, "S": tbptt_s, "B": tbptt_b},
+        "outputs": {"plot_dir": str(plot_dir), "model_dir": str(model_dir), "checkpoint": checkpoint_path},
+    }
+    write_run_config(plot_dir, run_cfg)
+    write_run_config(model_dir, run_cfg)
+
+
+def run_opt_cl_self(args) -> None:
+    run_id = make_run_id("opt_cl_self", args)
+    plot_dir = prepare_run_dir("plots/trained_cl_self", run_id)
+    model_dir = prepare_run_dir("model_cl_self", run_id)
+    cfg = {
+        "N_particles": 100000,
+        "N_mesh": 400,
+        "t1": 30.0,
+        "dt": 0.1,
+        "boxsize": 10 * jnp.pi,
+        "n0": 1.0,
+        "vb": 2.4,
+        "vth": 0.5,
+    }
+    cfg = apply_cfg_overrides(cfg, args)
+    nh = cfg["N_particles"] // 2
+    seed_ic = pick(args.seed_ic, 10)
+    train_steps = pick(args.train_steps, 200)
+    save_every = pick(args.save_every, 100)
+    train_seed = pick(args.train_seed, 0)
+    num_ics = args.num_ics
+    eval_mult = pick(args.eval_mult, 2.0)
+    tbptt_k = args.tbptt_k
+    tbptt_s = args.tbptt_s
+    tbptt_b = pick(args.tbptt_b, 4)
+    lr_start = pick(args.lr_start, 5e-2)
+    lr_end = pick(args.lr_end, 1e-3)
+    pic = make_pic(cfg, cfg["t1"])
+
+    e_control = ModeFeedbackActuator(
+        N_mesh=pic.N_mesh,
+        boxsize=pic.boxsize,
+        n_modes_space_in=10,
+        n_modes_space_out=10,
+        use_linear=False,
+        width=32,
+        depth=2,
+        init_scale=0.0,
+        u_max=None,
+        include_dc=False,
+        include_density_input=True,
+        closed_loop=True,
+        key=jax.random.PRNGKey(9),
+    )
+    y0 = pic.create_y0(jax.random.key(seed_ic))
+
+    optimizer = Optimizer(
+        pic=pic,
+        model=e_control,
+        y0=y0,
+        loss_metric=loss_metric_cancel_self_field,
+        lr=lr_start / tbptt_b,
+        lr_final=lr_end / tbptt_b,
+        save_dir=f"{model_dir}/",
+        tbptt_k=tbptt_k,
+        tbptt_s=tbptt_s,
+        batch_size=tbptt_b,
+        num_ics=num_ics,
+    )
+    e_control, train_losses, _ = optimizer.train(
+        n_steps=train_steps, save_every=save_every, seed=train_seed, print_status=True
+    )
+
+    pic_eval = make_pic(cfg, eval_mult * cfg["t1"])
+    checkpoint_path = str(model_dir / "model_checkpoint_final")
+    e_control = ModeFeedbackActuator.load_model(checkpoint_path)
+    y0_eval = pic_eval.create_y0(jax.random.key(pick(args.seed_ic_eval, 1024)))
+    pic_eval = pic_eval.run_simulation(y0_eval, E_control=e_control)
+
+    e_control_vmappable = lambda n, rho_hat, mom_hat: e_control(n, state=(rho_hat, mom_hat))
+    u = jax.vmap(e_control_vmappable, in_axes=(0, 0, 0))(
+        jnp.arange(pic_eval.ts.shape[0]),
+        jnp.fft.rfft(pic_eval.rho),
+        jnp.fft.rfft(pic_eval.momentum),
+    )
+    cancel_residual = u + pic_eval.E_field
+    cancel_mse_t = jnp.mean(cancel_residual**2, axis=-1)
+    save_time_series(
+        cancel_mse_t,
+        pic_eval.ts,
+        str(plot_dir / "cancel_residual_mse.png"),
+        ylabel=r"$\mathrm{MSE}(E_{ext}+E_{self})$",
+        title="Controller cancellation residual",
+    )
+
+    state_modes = {
+        "rho": {"max_mode_spect": 100, "max_mode_time": 5, "num": 6},
+        "momentum": {"max_mode_spect": 100, "max_mode_time": 5, "num": 6},
+        "energy": {"max_mode_spect": 100, "max_mode_time": 5, "num": 6},
+    }
+    ext_modes = {"max_mode_spect": 10, "max_mode_time": 10, "num": 6}
+    save_common_plots(
+        pic_eval,
+        u,
+        boxsize=cfg["boxsize"],
+        nh=nh,
+        out_dir=str(plot_dir),
+        base_modes=state_modes,
+        with_external_modes=True,
+        external_modes=ext_modes,
+    )
+    save_training_curve(train_losses, str(plot_dir / "train_losses.png"), use_log=True)
+    run_cfg = {
+        "mode": "opt_cl_self",
+        "run_id": run_id,
+        "args": vars(args),
+        "cfg": cfg,
+        "train": {
+            "train_steps": train_steps,
+            "save_every": save_every,
+            "train_seed": train_seed,
+            "num_ics": num_ics,
+            "lr_start": lr_start,
+            "lr_end": lr_end,
+            "loss": "mean((E_ext + E_self)^2)",
+        },
         "eval": {"eval_mult": eval_mult, "seed_ic_eval": pick(args.seed_ic_eval, 1024)},
         "tbptt": {"K": tbptt_k, "S": tbptt_s, "B": tbptt_b},
         "outputs": {"plot_dir": str(plot_dir), "model_dir": str(model_dir), "checkpoint": checkpoint_path},
@@ -744,6 +939,8 @@ def run_opt_cl_dis(args) -> None:
     tbptt_k = args.tbptt_k
     tbptt_s = args.tbptt_s
     tbptt_b = pick(args.tbptt_b, 4)
+    lr_start = pick(args.lr_start, 5e-2)
+    lr_end = pick(args.lr_end, 1e-3)
 
     pic = make_pic(cfg, cfg["t1"])
     e_control = DissipativeModeFeedbackActuator(
@@ -765,7 +962,8 @@ def run_opt_cl_dis(args) -> None:
         model=e_control,
         y0=y0,
         loss_metric=loss_metric_stable,
-        lr=1e-2,
+        lr=lr_start / tbptt_b,
+        lr_final=lr_end / tbptt_b,
         save_dir=f"{model_dir}/",
         tbptt_k=tbptt_k,
         tbptt_s=tbptt_s,
@@ -816,7 +1014,14 @@ def run_opt_cl_dis(args) -> None:
         "run_id": run_id,
         "args": vars(args),
         "cfg": cfg,
-        "train": {"train_steps": train_steps, "save_every": save_every, "train_seed": train_seed, "num_ics": num_ics},
+        "train": {
+            "train_steps": train_steps,
+            "save_every": save_every,
+            "train_seed": train_seed,
+            "num_ics": num_ics,
+            "lr_start": lr_start,
+            "lr_end": lr_end,
+        },
         "eval": {"eval_mult": eval_mult, "seed_ic_eval": pick(args.seed_ic_eval, 1024)},
         "tbptt": {"K": tbptt_k, "S": tbptt_s, "B": tbptt_b},
         "outputs": {"plot_dir": str(plot_dir), "model_dir": str(model_dir), "checkpoint": checkpoint_path},
@@ -873,7 +1078,7 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Run PIC workflows from one entrypoint.")
     parser.add_argument(
         "mode",
-        choices=["resp", "opt", "opt_cl", "load", "load_cl", "load_cl_dis", "opt_cl_dis", "zir"],
+        choices=["resp", "opt", "opt_cl", "opt_cl_self", "load", "load_cl", "load_cl_dis", "opt_cl_dis", "zir"],
         help="Workflow to run.",
     )
     parser.add_argument("--n-particles", type=int, default=None, help="Override number of particles.")
@@ -889,6 +1094,18 @@ def parse_args(argv=None):
     parser.add_argument("--train-steps", type=int, default=None, help="Override training iteration count.")
     parser.add_argument("--save-every", type=int, default=None, help="Override checkpoint frequency.")
     parser.add_argument("--train-seed", type=int, default=None, help="Override optimizer train seed.")
+    parser.add_argument(
+        "--lr-start",
+        type=float,
+        default=None,
+        help="Initial learning rate at start of training (before decay).",
+    )
+    parser.add_argument(
+        "--lr-end",
+        type=float,
+        default=None,
+        help="Final learning rate at end of training.",
+    )
     parser.add_argument("--tbptt-k", type=int, default=None, help="TBPTT truncation length K.")
     parser.add_argument("--tbptt-s", type=int, default=None, help="TBPTT stride S (sliding uses S < K).")
     parser.add_argument("--tbptt-b", type=int, default=None, help="Trajectory batch size B per optimizer step.")
@@ -925,6 +1142,8 @@ def main(argv=None):
         run_opt(args)
     elif args.mode == "opt_cl":
         run_opt_cl(args)
+    elif args.mode == "opt_cl_self":
+        run_opt_cl_self(args)
     elif args.mode == "load":
         run_load(args)
     elif args.mode == "load_cl":
