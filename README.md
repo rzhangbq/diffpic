@@ -54,15 +54,15 @@ CL_B4_SLIDE=(--tbptt-k 40 --tbptt-s 10 --tbptt-b 10)     # batched sliding-windo
 EXP=fair_cmp
 
 # Open-loop training
-python main.py opt "${COMMON[@]}" "${TRAIN_COMMON[@]}" --seed-ic-eval 10 --run-name "${EXP}_opt"
+python main.py opt "${COMMON[@]}" "${TRAIN_COMMON[@]}" --seed-ic-eval 5212 --run-name "${EXP}_opt"
 # Closed-loop ablations: _cl under matched train budget
-python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B1_NAIVE[@]}" --seed-ic-eval 10 --run-name "${EXP}_optcl_b1_naive"
+python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B1_NAIVE[@]}" --seed-ic-eval 5212 --run-name "${EXP}_optcl_b1_naive"
 
-python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B4_NAIVE[@]}" --seed-ic-eval 10 --run-name "${EXP}_optcl_b4_naive"
+python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B4_NAIVE[@]}" --seed-ic-eval 5212 --run-name "${EXP}_optcl_b4_naive"
 
-python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B4_TBPTT[@]}" --seed-ic-eval 10 --run-name "${EXP}_optcl_b4_tbptt"
+python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B4_TBPTT[@]}" --seed-ic-eval 5212 --run-name "${EXP}_optcl_b4_tbptt"
 
-python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B4_SLIDE[@]}" --seed-ic-eval 10 --run-name "${EXP}_optcl_b4_slide"
+python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B4_SLIDE[@]}" --seed-ic-eval 5212 --run-name "${EXP}_optcl_b4_slide"
 
 # testing on one unseen random IC (same IC for all comparisons)
 TEST_COMMON=(--seed-ic 4211 --t1 20 --dt 0.1 --n-particles 40000 --n-mesh 256 --boxsize 31.4159265359 --n0 1 --vb 2.4 --vth 0.5 --eval-mult 2)
