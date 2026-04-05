@@ -378,7 +378,7 @@ def run_opt(args) -> None:
     cfg = apply_cfg_overrides(cfg, args)
     nh = cfg["N_particles"] // 2
     seed_ic = pick(args.seed_ic, 10)
-    n_modes_time = 1
+    n_modes_time = 2
     n_modes_space = 10
     train_steps = pick(args.train_steps, 200)
     save_every = pick(args.save_every, 100)
