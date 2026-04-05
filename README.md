@@ -48,9 +48,9 @@ Example baseline (shared across all modes):
 COMMON=(--seed-ic 1907 --t1 20 --dt 0.1 --n-particles 40000 --n-mesh 256 --boxsize 31.4159265359 --n0 1 --vb 2.4 --vth 0.5 --eval-mult 2)
 TRAIN_COMMON=(--train-steps 200 --save-every 100 --train-seed 0)
 CL_B1_NAIVE=(--tbptt-k 200 --tbptt-s 200 --tbptt-b 1)   # batch=1 naive BPTT
-CL_B4_NAIVE=(--tbptt-k 200 --tbptt-s 200 --tbptt-b 4)   # batched naive BPTT
-CL_B4_TBPTT=(--tbptt-k 40 --tbptt-s 40 --tbptt-b 4)     # batched TBPTT
-CL_B4_SLIDE=(--tbptt-k 40 --tbptt-s 20 --tbptt-b 4)     # batched sliding-window TBPTT
+CL_B4_NAIVE=(--tbptt-k 200 --tbptt-s 200 --tbptt-b 10)   # batched naive BPTT
+CL_B4_TBPTT=(--tbptt-k 40 --tbptt-s 40 --tbptt-b 10)     # batched TBPTT
+CL_B4_SLIDE=(--tbptt-k 40 --tbptt-s 10 --tbptt-b 10)     # batched sliding-window TBPTT
 EXP=fair_cmp
 
 # Open-loop training
