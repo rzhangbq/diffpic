@@ -383,6 +383,7 @@ def run_opt(args) -> None:
     train_steps = pick(args.train_steps, 200)
     save_every = pick(args.save_every, 100)
     train_seed = pick(args.train_seed, 0)
+    num_ics = args.num_ics
     eval_mult = pick(args.eval_mult, 2.0)
     tbptt_k = args.tbptt_k
     tbptt_s = args.tbptt_s
@@ -413,6 +414,7 @@ def run_opt(args) -> None:
         tbptt_k=tbptt_k,
         tbptt_s=tbptt_s,
         batch_size=tbptt_b,
+        num_ics=num_ics,
     )
     e_control, train_losses, _ = optimizer.train(
         n_steps=train_steps, save_every=save_every, seed=train_seed, print_status=True
@@ -446,7 +448,7 @@ def run_opt(args) -> None:
         "run_id": run_id,
         "args": vars(args),
         "cfg": cfg,
-        "train": {"train_steps": train_steps, "save_every": save_every, "train_seed": train_seed},
+        "train": {"train_steps": train_steps, "save_every": save_every, "train_seed": train_seed, "num_ics": num_ics},
         "eval": {"eval_mult": eval_mult, "seed_ic_eval": pick(args.seed_ic_eval, seed_ic)},
         "tbptt": {"K": tbptt_k, "S": tbptt_s, "B": tbptt_b},
         "outputs": {"plot_dir": str(plot_dir), "model_dir": str(model_dir), "checkpoint": checkpoint_path},
@@ -475,6 +477,7 @@ def run_opt_cl(args) -> None:
     train_steps = pick(args.train_steps, 200)
     save_every = pick(args.save_every, 100)
     train_seed = pick(args.train_seed, 0)
+    num_ics = args.num_ics
     eval_mult = pick(args.eval_mult, 2.0)
     tbptt_k = args.tbptt_k
     tbptt_s = args.tbptt_s
@@ -507,6 +510,7 @@ def run_opt_cl(args) -> None:
         tbptt_k=tbptt_k,
         tbptt_s=tbptt_s,
         batch_size=tbptt_b,
+        num_ics=num_ics,
     )
     e_control, train_losses, _ = optimizer.train(
         n_steps=train_steps, save_every=save_every, seed=train_seed, print_status=True
@@ -543,7 +547,7 @@ def run_opt_cl(args) -> None:
         "run_id": run_id,
         "args": vars(args),
         "cfg": cfg,
-        "train": {"train_steps": train_steps, "save_every": save_every, "train_seed": train_seed},
+        "train": {"train_steps": train_steps, "save_every": save_every, "train_seed": train_seed, "num_ics": num_ics},
         "eval": {"eval_mult": eval_mult, "seed_ic_eval": pick(args.seed_ic_eval, 1024)},
         "tbptt": {"K": tbptt_k, "S": tbptt_s, "B": tbptt_b},
         "outputs": {"plot_dir": str(plot_dir), "model_dir": str(model_dir), "checkpoint": checkpoint_path},
@@ -726,6 +730,7 @@ def run_opt_cl_dis(args) -> None:
     train_steps = pick(args.train_steps, 200)
     save_every = pick(args.save_every, 100)
     train_seed = pick(args.train_seed, 0)
+    num_ics = args.num_ics
     eval_mult = pick(args.eval_mult, 2.0)
     tbptt_k = args.tbptt_k
     tbptt_s = args.tbptt_s
@@ -756,6 +761,7 @@ def run_opt_cl_dis(args) -> None:
         tbptt_k=tbptt_k,
         tbptt_s=tbptt_s,
         batch_size=tbptt_b,
+        num_ics=num_ics,
     )
     e_control, train_losses, _ = optimizer.train(
         n_steps=train_steps, save_every=save_every, seed=train_seed, print_status=True
@@ -801,7 +807,7 @@ def run_opt_cl_dis(args) -> None:
         "run_id": run_id,
         "args": vars(args),
         "cfg": cfg,
-        "train": {"train_steps": train_steps, "save_every": save_every, "train_seed": train_seed},
+        "train": {"train_steps": train_steps, "save_every": save_every, "train_seed": train_seed, "num_ics": num_ics},
         "eval": {"eval_mult": eval_mult, "seed_ic_eval": pick(args.seed_ic_eval, 1024)},
         "tbptt": {"K": tbptt_k, "S": tbptt_s, "B": tbptt_b},
         "outputs": {"plot_dir": str(plot_dir), "model_dir": str(model_dir), "checkpoint": checkpoint_path},
@@ -877,6 +883,7 @@ def parse_args(argv=None):
     parser.add_argument("--tbptt-k", type=int, default=None, help="TBPTT truncation length K.")
     parser.add_argument("--tbptt-s", type=int, default=None, help="TBPTT stride S (sliding uses S < K).")
     parser.add_argument("--tbptt-b", type=int, default=None, help="Trajectory batch size B per optimizer step.")
+    parser.add_argument("--num-ics", type=int, default=10, help="Number of random training ICs cycled during optimization.")
     parser.add_argument("--eval-mult", type=float, default=None, help="Multiplier for eval horizon vs t1.")
     parser.add_argument(
         "--run-name",

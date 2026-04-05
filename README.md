@@ -46,7 +46,7 @@ Example baseline (shared across all modes):
 ```bash
 # zsh-safe argument bundles (also works in bash)
 COMMON=(--seed-ic 1907 --t1 20 --dt 0.1 --n-particles 40000 --n-mesh 256 --boxsize 31.4159265359 --n0 1 --vb 2.4 --vth 0.5 --eval-mult 2)
-TRAIN_COMMON=(--train-steps 200 --save-every 100 --train-seed 0)
+TRAIN_COMMON=(--train-steps 200 --save-every 100 --train-seed 0 --num-ics 10)
 CL_B1_NAIVE=(--tbptt-k 200 --tbptt-s 200 --tbptt-b 1)   # batch=1 naive BPTT
 CL_B4_NAIVE=(--tbptt-k 200 --tbptt-s 200 --tbptt-b 10)   # batched naive BPTT
 CL_B4_TBPTT=(--tbptt-k 40 --tbptt-s 40 --tbptt-b 10)     # batched TBPTT
@@ -83,6 +83,7 @@ done
 Notes:
 
 - `--seed-ic-eval` controls the post-training evaluation IC for training modes.
+- `--num-ics` controls how many random training ICs are pre-generated and cycled (default: `10`).
 - Every execution creates a unique run folder and writes `run_config.json`.
   - plots: `plots/<mode_group>/<run_id>/`
   - training checkpoints: `model/<run_id>/`, `model_cl/<run_id>/`, `model_cl_dis/<run_id>/`

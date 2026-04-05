@@ -48,6 +48,7 @@ class Optimizer():
                        tbptt_k=None,
                        tbptt_s=None,
                        batch_size=None,
+                       num_ics=10,
                        y0=None,
                        lr=1e-4,
                        optim=None,
@@ -62,6 +63,12 @@ class Optimizer():
         self.batch_size = int(batch_size)
         if self.batch_size < 1:
             raise ValueError("batch_size must be >= 1.")
+
+        self.num_ics = int(num_ics)
+        if self.num_ics < 1:
+            raise ValueError("num_ics must be >= 1.")
+        if self.batch_size > 1 and self.num_ics % self.batch_size != 0:
+            raise ValueError("For batched training, num_ics must be a multiple of batch_size.")
 
         self.tbptt_k = int(tbptt_k) if tbptt_k is not None else int(self.pic.n_steps)
         self.tbptt_s = int(tbptt_s) if tbptt_s is not None else int(self.tbptt_k)
@@ -203,6 +210,9 @@ class Optimizer():
         valid_losses = []
 
         ic_key = jax.random.PRNGKey(seed)
+        ic_keys = jax.random.split(ic_key, self.num_ics)
+        y0_pool = jax.vmap(self.pic.create_y0)(ic_keys)
+
         total_trajectories = int(n_steps)
         trajectories_done = 0
         step = 0
@@ -212,13 +222,14 @@ class Optimizer():
                 print("--------------------")
                 print(f"Step: {step}")            
             start = time.time()
+
+            # Cycle deterministically through a fixed pool of ICs: ic#1 -> ic#num_ics -> repeat.
+            start_idx = trajectories_done % self.num_ics
+            ic_idx = (start_idx + jnp.arange(current_batch)) % self.num_ics
             if current_batch > 1:
-                ic_key, subkey = jax.random.split(ic_key)
-                ic_key_arr = jax.random.split(subkey, current_batch)
-                y0 = jax.vmap(self.pic.create_y0)(ic_key_arr)
+                y0 = tuple(arr[ic_idx] for arr in y0_pool)
             else:
-                ic_key, subkey = jax.random.split(ic_key)
-                y0 = self.pic.create_y0(subkey)
+                y0 = tuple(arr[ic_idx[0]] for arr in y0_pool)
             loss, self.model, opt_state = make_step(self.model, opt_state, y0)
             end = time.time()
             train_losses.append(loss)
