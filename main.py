@@ -496,6 +496,13 @@ def run_opt(args) -> None:
         out_dir=str(plot_dir),
         base_modes=default_modes,
     )
+    save_time_series(
+        jnp.sum(pic_eval.energy + pic_eval.E_field**2, axis=-1),
+        pic_eval.ts,
+        str(plot_dir / "energy_evolution.png"),
+        ylabel="Energy",
+        title="Energy Evolution",
+    )
     save_training_curve(train_losses, str(plot_dir / "train_losses.png"), use_log=False)
     run_cfg = {
         "mode": "opt",
@@ -609,6 +616,13 @@ def run_opt_cl(args) -> None:
         base_modes=state_modes,
         with_external_modes=True,
         external_modes=ext_modes,
+    )
+    save_time_series(
+        jnp.sum(pic_eval.energy + pic_eval.E_field**2, axis=-1),
+        pic_eval.ts,
+        str(plot_dir / "energy_evolution.png"),
+        ylabel="Energy",
+        title="Energy Evolution",
     )
     save_training_curve(train_losses, str(plot_dir / "train_losses.png"), use_log=True)
     run_cfg = {
@@ -732,6 +746,13 @@ def run_opt_cl_self(args) -> None:
         base_modes=state_modes,
         with_external_modes=True,
         external_modes=ext_modes,
+    )
+    save_time_series(
+        jnp.sum(pic_eval.energy + pic_eval.E_field**2, axis=-1),
+        pic_eval.ts,
+        str(plot_dir / "energy_evolution.png"),
+        ylabel="Energy",
+        title="Energy Evolution",
     )
     save_training_curve(train_losses, str(plot_dir / "train_losses.png"), use_log=True)
     run_cfg = {
