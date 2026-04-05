@@ -15,6 +15,7 @@ Available modes:
 - `opt_cl_dis` - train closed-loop dissipative actuator, then evaluate
 - `load` - load trained open-loop actuator and evaluate
 - `load_cl` - load trained closed-loop actuator and evaluate
+- `load_cl_dis` - load trained closed-loop dissipative actuator and evaluate
 
 ## Example runs (all cases)
 
@@ -26,6 +27,7 @@ python main.py opt_cl
 python main.py opt_cl_dis
 python main.py load
 python main.py load_cl
+python main.py load_cl_dis
 ```
 
 ## Fair-comparison runs
@@ -37,24 +39,58 @@ To compare methods fairly, use the same:
 - simulation time horizon (`--t1`) and step (`--dt`)
 - particle/mesh/distribution settings (`--n-particles`, `--n-mesh`, `--boxsize`, `--n0`, `--vb`, `--vth`)
 - evaluation horizon multiplier (`--eval-mult`)
+- TBPTT params for closed-loop training (`--tbptt-k`, `--tbptt-s`, `--tbptt-b`)
 
 Example baseline (shared across all modes):
 
 ```bash
-COMMON="--seed-ic 10 --t1 20 --dt 0.1 --n-particles 40000 --n-mesh 256 --boxsize 31.4159265359 --n0 1 --vb 2.4 --vth 0.5 --eval-mult 2"
-TRAIN_COMMON="--train-steps 200 --save-every 100 --train-seed 0"
+# zsh-safe argument bundles (also works in bash)
+COMMON=(--seed-ic 1907 --t1 20 --dt 0.1 --n-particles 40000 --n-mesh 256 --boxsize 31.4159265359 --n0 1 --vb 2.4 --vth 0.5 --eval-mult 2)
+TRAIN_COMMON=(--train-steps 200 --save-every 100 --train-seed 0)
+CL_B1_NAIVE=(--tbptt-k 200 --tbptt-s 200 --tbptt-b 1)   # batch=1 naive BPTT
+CL_B4_NAIVE=(--tbptt-k 200 --tbptt-s 200 --tbptt-b 4)   # batched naive BPTT
+CL_B4_TBPTT=(--tbptt-k 40 --tbptt-s 40 --tbptt-b 4)     # batched TBPTT
+CL_B4_SLIDE=(--tbptt-k 40 --tbptt-s 20 --tbptt-b 4)     # batched sliding-window TBPTT
+EXP=fair_cmp
 
-python main.py resp $COMMON --resp-amp 1.0
-python main.py zir $COMMON
-python main.py opt $COMMON $TRAIN_COMMON --seed-ic-eval 10
-python main.py opt_cl $COMMON $TRAIN_COMMON --seed-ic-eval 10
-python main.py opt_cl_dis $COMMON $TRAIN_COMMON --seed-ic-eval 10
-python main.py load $COMMON
-python main.py load_cl $COMMON
+# Open-loop training
+python main.py opt "${COMMON[@]}" "${TRAIN_COMMON[@]}" --seed-ic-eval 10 --run-name "${EXP}_opt"
+# Closed-loop ablations: _cl under matched train budget
+python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B1_NAIVE[@]}" --seed-ic-eval 10 --run-name "${EXP}_optcl_b1_naive"
+
+python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B4_NAIVE[@]}" --seed-ic-eval 10 --run-name "${EXP}_optcl_b4_naive"
+
+python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B4_TBPTT[@]}" --seed-ic-eval 10 --run-name "${EXP}_optcl_b4_tbptt"
+
+python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B4_SLIDE[@]}" --seed-ic-eval 10 --run-name "${EXP}_optcl_b4_slide"
+
+# testing on one unseen random IC (same IC for all comparisons)
+TEST_COMMON=(--seed-ic 4211 --t1 20 --dt 0.1 --n-particles 40000 --n-mesh 256 --boxsize 31.4159265359 --n0 1 --vb 2.4 --vth 0.5 --eval-mult 2)
+
+# Compare open-loop trained model vs resp/zir
+python main.py resp "${TEST_COMMON[@]}" --resp-amp 1.0 --run-name "${EXP}_test_opt_resp"
+python main.py zir "${TEST_COMMON[@]}" --run-name "${EXP}_test_opt_zir"
+python main.py load "${TEST_COMMON[@]}" --model-run "${EXP}_opt" --run-name "${EXP}_test_opt_load"
+
+# Compare each opt_cl variant vs resp/zir (same test IC)
+for RUN in optcl_b1_naive optcl_b4_naive optcl_b4_tbptt optcl_b4_slide; do
+  python main.py resp "${TEST_COMMON[@]}" --resp-amp 1.0 --run-name "${EXP}_test_${RUN}_resp"
+  python main.py zir "${TEST_COMMON[@]}" --run-name "${EXP}_test_${RUN}_zir"
+  python main.py load_cl "${TEST_COMMON[@]}" --model-run "${EXP}_${RUN}" --run-name "${EXP}_test_${RUN}_loadcl"
+done
 ```
 
 Notes:
 
 - `--seed-ic-eval` controls the post-training evaluation IC for training modes.
-- `load` and `load_cl` use pre-trained checkpoints (`model/` and `model_cl/`).
-- Each mode writes outputs to its own plot directory under `plots/`.
+- Every execution creates a unique run folder and writes `run_config.json`.
+  - plots: `plots/<mode_group>/<run_id>/`
+  - training checkpoints: `model/<run_id>/`, `model_cl/<run_id>/`, `model_cl_dis/<run_id>/`
+- `load` and `load_cl` resolve checkpoints from the latest run by default; use `--model-run <run_id>` to pin a specific run.
+- Use `--run-name <name>` (alias: `--run-dir <name>`) to set an explicit run folder name.
+- TBPTT semantics:
+  - `K = --tbptt-k` is truncate window length.
+  - `S = --tbptt-s` is sliding stride (`S=K` is naive TBPTT, `S<K` is sliding-window TBPTT).
+  - `B = --tbptt-b` is trajectory batch size per optimizer step.
+  - `--train-steps` is treated as the total trajectory budget; changing `B` does not change total trajectories seen.
+  - For batched runs, training uses `effective_lr = base_lr * B` to compensate for reduced optimizer update count.

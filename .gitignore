@@ -3,3 +3,4 @@
 *.png
 model_checkpoint_*
 .DS_Store
+run_config.json

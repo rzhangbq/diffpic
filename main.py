@@ -1,4 +1,6 @@
 import argparse
+import json
+from datetime import datetime
 from pathlib import Path
 
 import equinox as eqx
@@ -55,6 +57,54 @@ def pick(value, default):
 
 def ensure_parent(path: str) -> None:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
+
+
+def make_run_id(mode: str, args) -> str:
+    if args.run_name:
+        return args.run_name
+    return f"{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}_{mode}"
+
+
+def prepare_run_dir(base_dir: str, run_id: str) -> Path:
+    run_dir = Path(base_dir) / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    return run_dir
+
+
+def write_run_config(run_dir: Path, config: dict) -> None:
+    cfg_path = run_dir / "run_config.json"
+    cfg_path.write_text(json.dumps(config, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def _latest_subrun_checkpoint(base_dir: str, checkpoint_name: str = "model_checkpoint_final") -> Path | None:
+    base = Path(base_dir)
+    if not base.exists():
+        return None
+    candidates = [d for d in base.iterdir() if d.is_dir() and (d / checkpoint_name).exists()]
+    if not candidates:
+        return None
+    latest = max(candidates, key=lambda p: p.stat().st_mtime)
+    return latest / checkpoint_name
+
+
+def resolve_checkpoint(base_dir: str, args, checkpoint_name: str = "model_checkpoint_final") -> str:
+    if args.model_run is not None:
+        requested = Path(base_dir) / args.model_run / checkpoint_name
+        if not requested.exists():
+            raise FileNotFoundError(f"Checkpoint not found for --model-run: {requested}")
+        return str(requested)
+
+    latest = _latest_subrun_checkpoint(base_dir, checkpoint_name=checkpoint_name)
+    if latest is not None:
+        return str(latest)
+
+    legacy = Path(base_dir) / checkpoint_name
+    if legacy.exists():
+        return str(legacy)
+    raise FileNotFoundError(
+        f"No checkpoint found in {base_dir}. Expected either {base_dir}/{checkpoint_name} "
+        f"or {base_dir}/<run_id>/{checkpoint_name}."
+    )
 
 
 def save_training_curve(train_losses, save_path: str, *, use_log: bool) -> None:
@@ -250,6 +300,8 @@ def create_response_initial_conditions(pic: PICSimulation, *, seed: int, pos_sam
 
 
 def run_resp(args) -> None:
+    run_id = make_run_id("resp", args)
+    plot_dir = prepare_run_dir("plots/resp", run_id)
     cfg = {
         "N_particles": 40000,
         "N_mesh": 400,
@@ -295,10 +347,24 @@ def run_resp(args) -> None:
         "momentum": {"max_mode_spect": 10, "max_mode_time": 5, "num": 4},
         "energy": {"max_mode_spect": 10, "max_mode_time": 5, "num": 4},
     }
-    save_common_plots(pic, u, boxsize=cfg["boxsize"], nh=nh, out_dir="plots/resp", base_modes=default_modes)
+    save_common_plots(pic, u, boxsize=cfg["boxsize"], nh=nh, out_dir=str(plot_dir), base_modes=default_modes)
+    write_run_config(
+        plot_dir,
+        {
+            "mode": "resp",
+            "run_id": run_id,
+            "args": vars(args),
+            "cfg": cfg,
+            "mode_params": {"n_mode": n_mode, "m_mode": m_mode, "amp": amp, "phase": phase},
+            "outputs": {"plot_dir": str(plot_dir)},
+        },
+    )
 
 
 def run_opt(args) -> None:
+    run_id = make_run_id("opt", args)
+    plot_dir = prepare_run_dir("plots/trained", run_id)
+    model_dir = prepare_run_dir("model", run_id)
     cfg = {
         "N_particles": 40000,
         "N_mesh": 256,
@@ -312,12 +378,15 @@ def run_opt(args) -> None:
     cfg = apply_cfg_overrides(cfg, args)
     nh = cfg["N_particles"] // 2
     seed_ic = pick(args.seed_ic, 10)
-    n_modes_time = 1
-    n_modes_space = 4
+    n_modes_time = 5
+    n_modes_space = 10
     train_steps = pick(args.train_steps, 200)
     save_every = pick(args.save_every, 100)
     train_seed = pick(args.train_seed, 0)
     eval_mult = pick(args.eval_mult, 2.0)
+    tbptt_k = args.tbptt_k
+    tbptt_s = args.tbptt_s
+    tbptt_b = pick(args.tbptt_b, 1)
     pic = make_pic(cfg, cfg["t1"])
 
     e_control = FourierActuator(
@@ -333,13 +402,25 @@ def run_opt(args) -> None:
     )
 
     y0 = pic.create_y0(jax.random.key(seed_ic))
-    optimizer = Optimizer(pic=pic, model=e_control, K=None, y0=y0, loss_metric=loss_metric, lr=1e-1)
+    optimizer = Optimizer(
+        pic=pic,
+        model=e_control,
+        K=None,
+        y0=y0,
+        loss_metric=loss_metric,
+        lr=5e-3,
+        save_dir=f"{model_dir}/",
+        tbptt_k=tbptt_k,
+        tbptt_s=tbptt_s,
+        batch_size=tbptt_b,
+    )
     e_control, train_losses, _ = optimizer.train(
         n_steps=train_steps, save_every=save_every, seed=train_seed, print_status=True
     )
 
     pic_eval = make_pic(cfg, eval_mult * cfg["t1"])
-    e_control = FourierActuator.load_model("model/model_checkpoint_final")
+    checkpoint_path = str(model_dir / "model_checkpoint_final")
+    e_control = FourierActuator.load_model(checkpoint_path)
     print("Control modes:\n", e_control.get_modes_summary())
 
     y0_eval = pic_eval.create_y0(jax.random.key(pick(args.seed_ic_eval, seed_ic)))
@@ -356,13 +437,28 @@ def run_opt(args) -> None:
         u,
         boxsize=cfg["boxsize"],
         nh=nh,
-        out_dir="plots/trained",
+        out_dir=str(plot_dir),
         base_modes=default_modes,
     )
-    save_training_curve(train_losses, "plots/trained/train_losses.png", use_log=False)
+    save_training_curve(train_losses, str(plot_dir / "train_losses.png"), use_log=False)
+    run_cfg = {
+        "mode": "opt",
+        "run_id": run_id,
+        "args": vars(args),
+        "cfg": cfg,
+        "train": {"train_steps": train_steps, "save_every": save_every, "train_seed": train_seed},
+        "eval": {"eval_mult": eval_mult, "seed_ic_eval": pick(args.seed_ic_eval, seed_ic)},
+        "tbptt": {"K": tbptt_k, "S": tbptt_s, "B": tbptt_b},
+        "outputs": {"plot_dir": str(plot_dir), "model_dir": str(model_dir), "checkpoint": checkpoint_path},
+    }
+    write_run_config(plot_dir, run_cfg)
+    write_run_config(model_dir, run_cfg)
 
 
 def run_opt_cl(args) -> None:
+    run_id = make_run_id("opt_cl", args)
+    plot_dir = prepare_run_dir("plots/trained_cl", run_id)
+    model_dir = prepare_run_dir("model_cl", run_id)
     cfg = {
         "N_particles": 100000,
         "N_mesh": 400,
@@ -376,11 +472,13 @@ def run_opt_cl(args) -> None:
     cfg = apply_cfg_overrides(cfg, args)
     nh = cfg["N_particles"] // 2
     seed_ic = pick(args.seed_ic, 10)
-    k_lookback = 4
     train_steps = pick(args.train_steps, 200)
     save_every = pick(args.save_every, 100)
     train_seed = pick(args.train_seed, 0)
     eval_mult = pick(args.eval_mult, 2.0)
+    tbptt_k = args.tbptt_k
+    tbptt_s = args.tbptt_s
+    tbptt_b = pick(args.tbptt_b, 4)
     pic = make_pic(cfg, cfg["t1"])
 
     e_control = ModeFeedbackActuator(
@@ -388,7 +486,7 @@ def run_opt_cl(args) -> None:
         boxsize=pic.boxsize,
         n_modes_space_in=10,
         n_modes_space_out=10,
-        use_linear=False,
+        use_linear=False, 
         width=32,
         depth=2,
         init_scale=0.0,
@@ -402,18 +500,21 @@ def run_opt_cl(args) -> None:
     optimizer = Optimizer(
         pic=pic,
         model=e_control,
-        K=k_lookback,
         y0=y0,
         loss_metric=loss_metric_density_modes,
-        lr=1e-2,
-        save_dir="model_cl/",
+        lr=5e-3,
+        save_dir=f"{model_dir}/",
+        tbptt_k=tbptt_k,
+        tbptt_s=tbptt_s,
+        batch_size=tbptt_b,
     )
     e_control, train_losses, _ = optimizer.train(
         n_steps=train_steps, save_every=save_every, seed=train_seed, print_status=True
     )
 
     pic_eval = make_pic(cfg, eval_mult * cfg["t1"])
-    e_control = ModeFeedbackActuator.load_model("model_cl/model_checkpoint_final")
+    checkpoint_path = str(model_dir / "model_checkpoint_final")
+    e_control = ModeFeedbackActuator.load_model(checkpoint_path)
     y0_eval = pic_eval.create_y0(jax.random.key(pick(args.seed_ic_eval, 1024)))
     pic_eval = pic_eval.run_simulation(y0_eval, E_control=e_control)
 
@@ -425,21 +526,35 @@ def run_opt_cl(args) -> None:
         "momentum": {"max_mode_spect": 100, "max_mode_time": 5, "num": 6},
         "energy": {"max_mode_spect": 100, "max_mode_time": 5, "num": 6},
     }
-    ext_modes = {"max_mode_spect": 4, "max_mode_time": 4, "num": 6}
+    ext_modes = {"max_mode_spect": 10, "max_mode_time": 10, "num": 6}
     save_common_plots(
         pic_eval,
         u,
         boxsize=cfg["boxsize"],
         nh=nh,
-        out_dir="plots/trained_cl",
+        out_dir=str(plot_dir),
         base_modes=state_modes,
         with_external_modes=True,
         external_modes=ext_modes,
     )
-    save_training_curve(train_losses, "plots/trained_cl/train_losses.png", use_log=True)
+    save_training_curve(train_losses, str(plot_dir / "train_losses.png"), use_log=True)
+    run_cfg = {
+        "mode": "opt_cl",
+        "run_id": run_id,
+        "args": vars(args),
+        "cfg": cfg,
+        "train": {"train_steps": train_steps, "save_every": save_every, "train_seed": train_seed},
+        "eval": {"eval_mult": eval_mult, "seed_ic_eval": pick(args.seed_ic_eval, 1024)},
+        "tbptt": {"K": tbptt_k, "S": tbptt_s, "B": tbptt_b},
+        "outputs": {"plot_dir": str(plot_dir), "model_dir": str(model_dir), "checkpoint": checkpoint_path},
+    }
+    write_run_config(plot_dir, run_cfg)
+    write_run_config(model_dir, run_cfg)
 
 
 def run_load(args) -> None:
+    run_id = make_run_id("load", args)
+    plot_dir = prepare_run_dir("plots/test", run_id)
     cfg = {
         "N_particles": 100000,
         "N_mesh": 4000,
@@ -455,7 +570,8 @@ def run_load(args) -> None:
     pic = make_pic(cfg, cfg["t1"])
     y0 = pic.create_y0(jax.random.key(pick(args.seed_ic, 42)))
 
-    e_control = FourierActuator.load_model("model/model_checkpoint_final")
+    checkpoint_path = resolve_checkpoint("model", args)
+    e_control = FourierActuator.load_model(checkpoint_path)
     print(e_control)
     print("Control modes:\n", e_control.get_modes_summary())
 
@@ -467,10 +583,23 @@ def run_load(args) -> None:
         "momentum": {"max_mode_spect": 10, "max_mode_time": 5, "num": 4},
         "energy": {"max_mode_spect": 10, "max_mode_time": 5, "num": 4},
     }
-    save_common_plots(pic, u, boxsize=cfg["boxsize"], nh=nh, out_dir="plots/test", base_modes=default_modes)
+    save_common_plots(pic, u, boxsize=cfg["boxsize"], nh=nh, out_dir=str(plot_dir), base_modes=default_modes)
+    write_run_config(
+        plot_dir,
+        {
+            "mode": "load",
+            "run_id": run_id,
+            "args": vars(args),
+            "cfg": cfg,
+            "inputs": {"checkpoint": checkpoint_path},
+            "outputs": {"plot_dir": str(plot_dir)},
+        },
+    )
 
 
 def run_load_cl(args) -> None:
+    run_id = make_run_id("load_cl", args)
+    plot_dir = prepare_run_dir("plots/test_cl", run_id)
     cfg = {
         "N_particles": 40000,
         "N_mesh": 256,
@@ -485,7 +614,8 @@ def run_load_cl(args) -> None:
     nh = cfg["N_particles"] // 2
     eval_mult = pick(args.eval_mult, 2.0)
     pic = make_pic(cfg, eval_mult * cfg["t1"])
-    e_control = ModeFeedbackActuator.load_model("model_cl/model_checkpoint_final")
+    checkpoint_path = resolve_checkpoint("model_cl", args)
+    e_control = ModeFeedbackActuator.load_model(checkpoint_path)
     y0 = pic.create_y0(jax.random.key(pick(args.seed_ic, 234)))
     pic = pic.run_simulation(y0, E_control=e_control)
 
@@ -497,20 +627,88 @@ def run_load_cl(args) -> None:
         "momentum": {"max_mode_spect": 100, "max_mode_time": 5, "num": 6},
         "energy": {"max_mode_spect": 100, "max_mode_time": 5, "num": 6},
     }
-    ext_modes = {"max_mode_spect": 4, "max_mode_time": 4, "num": 6}
+    ext_modes = {"max_mode_spect": 10, "max_mode_time": 10, "num": 6}
     save_common_plots(
         pic,
         u,
         boxsize=cfg["boxsize"],
         nh=nh,
-        out_dir="plots/test_cl",
+        out_dir=str(plot_dir),
         base_modes=state_modes,
         with_external_modes=True,
         external_modes=ext_modes,
     )
+    write_run_config(
+        plot_dir,
+        {
+            "mode": "load_cl",
+            "run_id": run_id,
+            "args": vars(args),
+            "cfg": cfg,
+            "inputs": {"checkpoint": checkpoint_path},
+            "outputs": {"plot_dir": str(plot_dir)},
+        },
+    )
+
+
+def run_load_cl_dis(args) -> None:
+    run_id = make_run_id("load_cl_dis", args)
+    plot_dir = prepare_run_dir("plots/test_cl_dis", run_id)
+    cfg = {
+        "N_particles": 40000,
+        "N_mesh": 256,
+        "t1": 20.0,
+        "dt": 0.1,
+        "boxsize": 10 * jnp.pi,
+        "n0": 1.0,
+        "vb": 2.4,
+        "vth": 0.5,
+    }
+    cfg = apply_cfg_overrides(cfg, args)
+    nh = cfg["N_particles"] // 2
+    eval_mult = pick(args.eval_mult, 2.0)
+    pic = make_pic(cfg, eval_mult * cfg["t1"])
+    checkpoint_path = resolve_checkpoint("model_cl_dis", args)
+    e_control = DissipativeModeFeedbackActuator.load_model(checkpoint_path)
+    y0 = pic.create_y0(jax.random.key(pick(args.seed_ic, 234)))
+    pic = pic.run_simulation(y0, E_control=e_control)
+
+    e_control_vmappable = lambda n, x: e_control(n, state=x)
+    u = jax.vmap(e_control_vmappable, in_axes=(0, 0))(jnp.arange(pic.ts.shape[0]), jnp.fft.rfft(pic.momentum))
+
+    state_modes = {
+        "rho": {"max_mode_spect": 100, "max_mode_time": 5, "num": 6},
+        "momentum": {"max_mode_spect": 100, "max_mode_time": 5, "num": 6},
+        "energy": {"max_mode_spect": 100, "max_mode_time": 5, "num": 6},
+    }
+    ext_modes = {"max_mode_spect": 10, "max_mode_time": 10, "num": 6}
+    save_common_plots(
+        pic,
+        u,
+        boxsize=cfg["boxsize"],
+        nh=nh,
+        out_dir=str(plot_dir),
+        base_modes=state_modes,
+        with_external_modes=True,
+        external_modes=ext_modes,
+    )
+    write_run_config(
+        plot_dir,
+        {
+            "mode": "load_cl_dis",
+            "run_id": run_id,
+            "args": vars(args),
+            "cfg": cfg,
+            "inputs": {"checkpoint": checkpoint_path},
+            "outputs": {"plot_dir": str(plot_dir)},
+        },
+    )
 
 
 def run_opt_cl_dis(args) -> None:
+    run_id = make_run_id("opt_cl_dis", args)
+    plot_dir = prepare_run_dir("plots/trained_cl_dis", run_id)
+    model_dir = prepare_run_dir("model_cl_dis", run_id)
     cfg = {
         "N_particles": 40000,
         "N_mesh": 256,
@@ -524,12 +722,14 @@ def run_opt_cl_dis(args) -> None:
     cfg = apply_cfg_overrides(cfg, args)
     nh = cfg["N_particles"] // 2
     seed_ic = pick(args.seed_ic, 10)
-    k_lookback = 4
     n_modes_space_out = 10
     train_steps = pick(args.train_steps, 200)
     save_every = pick(args.save_every, 100)
     train_seed = pick(args.train_seed, 0)
     eval_mult = pick(args.eval_mult, 2.0)
+    tbptt_k = args.tbptt_k
+    tbptt_s = args.tbptt_s
+    tbptt_b = pick(args.tbptt_b, 4)
 
     pic = make_pic(cfg, cfg["t1"])
     e_control = DissipativeModeFeedbackActuator(
@@ -549,18 +749,21 @@ def run_opt_cl_dis(args) -> None:
     optimizer = Optimizer(
         pic=pic,
         model=e_control,
-        K=k_lookback,
         y0=y0,
         loss_metric=loss_metric_stable,
-        lr=1e-2,
-        save_dir="model_cl_dis/",
+        lr=5e-3,
+        save_dir=f"{model_dir}/",
+        tbptt_k=tbptt_k,
+        tbptt_s=tbptt_s,
+        batch_size=tbptt_b,
     )
     e_control, train_losses, _ = optimizer.train(
         n_steps=train_steps, save_every=save_every, seed=train_seed, print_status=True
     )
 
     pic_eval = make_pic(cfg, eval_mult * cfg["t1"])
-    e_control = DissipativeModeFeedbackActuator.load_model("model_cl_dis/model_checkpoint_final")
+    checkpoint_path = str(model_dir / "model_checkpoint_final")
+    e_control = DissipativeModeFeedbackActuator.load_model(checkpoint_path)
     y0_eval = pic_eval.create_y0(jax.random.key(pick(args.seed_ic_eval, 1024)))
     pic_eval = pic_eval.run_simulation(y0_eval, E_control=e_control)
 
@@ -580,7 +783,7 @@ def run_opt_cl_dis(args) -> None:
         u,
         boxsize=cfg["boxsize"],
         nh=nh,
-        out_dir="plots/trained_cl_dis",
+        out_dir=str(plot_dir),
         base_modes=state_modes,
         with_external_modes=True,
         external_modes=ext_modes,
@@ -588,14 +791,28 @@ def run_opt_cl_dis(args) -> None:
     save_time_series(
         jnp.sum(pic_eval.energy, axis=-1),
         pic_eval.ts,
-        "plots/trained_cl_dis/energy_evolution.png",
+        str(plot_dir / "energy_evolution.png"),
         ylabel="Energy",
         title="Energy Evolution",
     )
-    save_training_curve(train_losses, "plots/trained_cl_dis/train_losses.png", use_log=True)
+    save_training_curve(train_losses, str(plot_dir / "train_losses.png"), use_log=True)
+    run_cfg = {
+        "mode": "opt_cl_dis",
+        "run_id": run_id,
+        "args": vars(args),
+        "cfg": cfg,
+        "train": {"train_steps": train_steps, "save_every": save_every, "train_seed": train_seed},
+        "eval": {"eval_mult": eval_mult, "seed_ic_eval": pick(args.seed_ic_eval, 1024)},
+        "tbptt": {"K": tbptt_k, "S": tbptt_s, "B": tbptt_b},
+        "outputs": {"plot_dir": str(plot_dir), "model_dir": str(model_dir), "checkpoint": checkpoint_path},
+    }
+    write_run_config(plot_dir, run_cfg)
+    write_run_config(model_dir, run_cfg)
 
 
 def run_zir(args) -> None:
+    run_id = make_run_id("zir", args)
+    plot_dir = prepare_run_dir("plots/zir", run_id)
     cfg = {
         "N_particles": 100000,
         "N_mesh": 400,
@@ -617,13 +834,23 @@ def run_zir(args) -> None:
         "momentum": {"max_mode_spect": 10, "max_mode_time": 5, "num": 4},
         "energy": {"max_mode_spect": 10, "max_mode_time": 5, "num": 4},
     }
-    save_state_only_plots(pic, boxsize=cfg["boxsize"], nh=nh, out_dir="plots/zir", base_modes=default_modes)
+    save_state_only_plots(pic, boxsize=cfg["boxsize"], nh=nh, out_dir=str(plot_dir), base_modes=default_modes)
     save_time_series(
         jnp.sum(pic.energy + pic.E_field**2, axis=-1),
         pic.ts,
-        "plots/zir/energy_evolution.png",
+        str(plot_dir / "energy_evolution.png"),
         ylabel="Energy",
         title="Energy Evolution",
+    )
+    write_run_config(
+        plot_dir,
+        {
+            "mode": "zir",
+            "run_id": run_id,
+            "args": vars(args),
+            "cfg": cfg,
+            "outputs": {"plot_dir": str(plot_dir)},
+        },
     )
 
 
@@ -631,7 +858,7 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Run PIC workflows from one entrypoint.")
     parser.add_argument(
         "mode",
-        choices=["resp", "opt", "opt_cl", "load", "load_cl", "opt_cl_dis", "zir"],
+        choices=["resp", "opt", "opt_cl", "load", "load_cl", "load_cl_dis", "opt_cl_dis", "zir"],
         help="Workflow to run.",
     )
     parser.add_argument("--n-particles", type=int, default=None, help="Override number of particles.")
@@ -647,7 +874,24 @@ def parse_args(argv=None):
     parser.add_argument("--train-steps", type=int, default=None, help="Override training iteration count.")
     parser.add_argument("--save-every", type=int, default=None, help="Override checkpoint frequency.")
     parser.add_argument("--train-seed", type=int, default=None, help="Override optimizer train seed.")
+    parser.add_argument("--tbptt-k", type=int, default=None, help="TBPTT truncation length K.")
+    parser.add_argument("--tbptt-s", type=int, default=None, help="TBPTT stride S (sliding uses S < K).")
+    parser.add_argument("--tbptt-b", type=int, default=None, help="Trajectory batch size B per optimizer step.")
     parser.add_argument("--eval-mult", type=float, default=None, help="Multiplier for eval horizon vs t1.")
+    parser.add_argument(
+        "--run-name",
+        "--run-dir",
+        dest="run_name",
+        type=str,
+        default=None,
+        help="Optional run folder name (alias: --run-dir). Default is timestamped auto name.",
+    )
+    parser.add_argument(
+        "--model-run",
+        type=str,
+        default=None,
+        help="For load/load_cl: load checkpoint from model/<model_run>/model_checkpoint_final.",
+    )
     parser.add_argument(
         "--resp-amp",
         type=float,
@@ -669,6 +913,8 @@ def main(argv=None):
         run_load(args)
     elif args.mode == "load_cl":
         run_load_cl(args)
+    elif args.mode == "load_cl_dis":
+        run_load_cl_dis(args)
     elif args.mode == "opt_cl_dis":
         run_opt_cl_dis(args)
     else:
