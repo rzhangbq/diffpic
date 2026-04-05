@@ -378,7 +378,7 @@ def run_opt(args) -> None:
     cfg = apply_cfg_overrides(cfg, args)
     nh = cfg["N_particles"] // 2
     seed_ic = pick(args.seed_ic, 10)
-    n_modes_time = 5
+    n_modes_time = 1
     n_modes_space = 10
     train_steps = pick(args.train_steps, 200)
     save_every = pick(args.save_every, 100)
@@ -409,7 +409,7 @@ def run_opt(args) -> None:
         K=None,
         y0=y0,
         loss_metric=loss_metric,
-        lr=5e-3,
+        lr=1e-2,
         save_dir=f"{model_dir}/",
         tbptt_k=tbptt_k,
         tbptt_s=tbptt_s,
@@ -505,7 +505,7 @@ def run_opt_cl(args) -> None:
         model=e_control,
         y0=y0,
         loss_metric=loss_metric_density_modes,
-        lr=5e-3,
+        lr=1e-2,
         save_dir=f"{model_dir}/",
         tbptt_k=tbptt_k,
         tbptt_s=tbptt_s,
@@ -756,7 +756,7 @@ def run_opt_cl_dis(args) -> None:
         model=e_control,
         y0=y0,
         loss_metric=loss_metric_stable,
-        lr=5e-3,
+        lr=1e-2,
         save_dir=f"{model_dir}/",
         tbptt_k=tbptt_k,
         tbptt_s=tbptt_s,
