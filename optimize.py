@@ -190,10 +190,16 @@ class Optimizer():
             pic = self.pic.run_simulation(y0, E_control=model)
             return self.loss_metric(pic, **kwargs)
 
+        if self.tbptt_k >= total_steps:
+            # Fallback to full-trajectory loss when K exceeds horizon.
+            pic = self.pic.run_simulation(y0, E_control=model)
+            return self.loss_metric(pic, **kwargs)
+
         y_state = self._init_scan_state(y0, model)
         losses = []
-        for n0 in range(0, total_steps, self.tbptt_s):
-            length = min(self.tbptt_k, total_steps - n0)
+        max_start = total_steps - self.tbptt_k
+        for n0 in range(0, max_start + 1, self.tbptt_s):
+            length = self.tbptt_k
             y_end, outs = self._scan_steps(y_state, n0, length, model)
             pic_window = self._pic_from_scan_outs(outs)
             losses.append(self.loss_metric(pic_window, **kwargs))
