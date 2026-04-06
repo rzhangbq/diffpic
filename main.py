@@ -440,8 +440,8 @@ def run_opt(args) -> None:
     tbptt_k = args.tbptt_k
     tbptt_s = args.tbptt_s
     tbptt_b = pick(args.tbptt_b, 1)
-    lr_start = pick(args.lr_start, 5e-2)
-    lr_end = pick(args.lr_end, 1e-3)
+    lr_start = pick(args.lr_start, 1e-2)
+    lr_end = pick(args.lr_end, 2e-4)
     pic = make_pic(cfg, cfg["t1"])
 
     e_control = FourierActuator(
@@ -554,8 +554,8 @@ def run_opt_cl(args) -> None:
     tbptt_k = args.tbptt_k
     tbptt_s = args.tbptt_s
     tbptt_b = pick(args.tbptt_b, 4)
-    lr_start = pick(args.lr_start, 5e-2)
-    lr_end = pick(args.lr_end, 1e-3)
+    lr_start = pick(args.lr_start, 1e-2)
+    lr_end = pick(args.lr_end, 2e-4)
     pic = make_pic(cfg, cfg["t1"])
 
     e_control = ModeFeedbackActuator(
@@ -672,8 +672,8 @@ def run_opt_cl_self(args) -> None:
     tbptt_k = args.tbptt_k
     tbptt_s = args.tbptt_s
     tbptt_b = pick(args.tbptt_b, 4)
-    lr_start = pick(args.lr_start, 5e-2)
-    lr_end = pick(args.lr_end, 1e-3)
+    lr_start = pick(args.lr_start, 1e-2)
+    lr_end = pick(args.lr_end, 2e-4)
     pic = make_pic(cfg, cfg["t1"])
 
     e_control = ModeFeedbackActuator(
@@ -958,8 +958,8 @@ def run_opt_cl_dis(args) -> None:
     tbptt_k = args.tbptt_k
     tbptt_s = args.tbptt_s
     tbptt_b = pick(args.tbptt_b, 4)
-    lr_start = pick(args.lr_start, 5e-2)
-    lr_end = pick(args.lr_end, 1e-3)
+    lr_start = pick(args.lr_start, 1e-2)
+    lr_end = pick(args.lr_end, 2e-4)
 
     pic = make_pic(cfg, cfg["t1"])
     e_control = DissipativeModeFeedbackActuator(

@@ -47,7 +47,7 @@ Example baseline (shared across all modes):
 
 ```bash
 # zsh-safe argument bundles (also works in bash)
-COMMON=(--seed-ic 1907 --t1 20 --dt 0.1 --n-particles 40000 --n-mesh 256 --boxsize 31.4159265359 --n0 1 --vb 2.4 --vth 0.5 --eval-mult 2)
+COMMON=(--seed-ic 5212 --t1 20 --dt 0.1 --n-particles 40000 --n-mesh 256 --boxsize 31.4159265359 --n0 1 --vb 2.4 --vth 0.5 --eval-mult 2)
 TRAIN_COMMON=(--train-steps 300 --save-every 100 --train-seed 0 --num-ics 1)
 CL_B1_NAIVE=(--tbptt-k 200 --tbptt-s 200 --tbptt-b 1)    # batch=1 naive BPTT
 CL_B1_TBPTT=(--tbptt-k 100 --tbptt-s 100 --tbptt-b 1)      # batch=1 TBPTT
@@ -60,7 +60,7 @@ EXP=fair_cmp
 # Open-loop training
 python main.py opt "${COMMON[@]}" "${TRAIN_COMMON[@]}" --seed-ic-eval 5212 --run-name "${EXP}_opt"&
 # Closed-loop self-field cancellation overfit check (target: E_ext = -E_self)
-python main.py opt_cl_self "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B1_NAIVE[@]}" --num-ics 1 --seed-ic-eval 5212 --run-name "${EXP}_optcl_self_overfit"&
+python main.py opt_cl_self "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B1_NAIVE[@]}" --seed-ic-eval 5212 --run-name "${EXP}_optcl_self_overfit"&
 # Closed-loop ablations: _cl under matched train budget
 python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B1_NAIVE[@]}" --seed-ic-eval 5212 --run-name "${EXP}_optcl_b1_naive"&
 
