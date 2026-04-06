@@ -47,8 +47,8 @@ Example baseline (shared across all modes):
 
 ```bash
 # zsh-safe argument bundles (also works in bash)
-COMMON=(--seed-ic 5212 --t1 20 --dt 0.1 --n-particles 40000 --n-mesh 256 --boxsize 31.4159265359 --n0 1 --vb 2.4 --vth 0.5 --eval-mult 2)
-TRAIN_COMMON=(--train-steps 300 --save-every 100 --train-seed 0 --num-ics 1)
+COMMON=(--seed-ic 1907 --t1 20 --dt 0.1 --n-particles 40000 --n-mesh 256 --boxsize 31.4159265359 --n0 1 --vb 2.4 --vth 0.5 --eval-mult 2)
+TRAIN_COMMON=(--train-steps 300 --save-every 100 --train-seed 0 --num-ics 30)
 CL_B1_NAIVE=(--tbptt-k 200 --tbptt-s 200 --tbptt-b 1)    # batch=1 naive BPTT
 CL_B1_TBPTT=(--tbptt-k 100 --tbptt-s 100 --tbptt-b 1)      # batch=1 TBPTT
 CL_B1_SLIDE=(--tbptt-k 100 --tbptt-s 25 --tbptt-b 1)       # batch=1 sliding-window TBPTT
