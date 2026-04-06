@@ -51,10 +51,10 @@ COMMON=(--seed-ic 1907 --t1 20 --dt 0.1 --n-particles 40000 --n-mesh 256 --boxsi
 TRAIN_COMMON=(--train-steps 300 --save-every 100 --train-seed 0 --num-ics 30)
 CL_B1_NAIVE=(--tbptt-k 200 --tbptt-s 200 --tbptt-b 1)    # batch=1 naive BPTT
 CL_B1_TBPTT=(--tbptt-k 100 --tbptt-s 100 --tbptt-b 1)      # batch=1 TBPTT
-CL_B1_SLIDE=(--tbptt-k 100 --tbptt-s 25 --tbptt-b 1)       # batch=1 sliding-window TBPTT
-CL_B4_NAIVE=(--tbptt-k 200 --tbptt-s 200 --tbptt-b 10)   # batched naive BPTT
-CL_B4_TBPTT=(--tbptt-k 100 --tbptt-s 100 --tbptt-b 10)     # batched TBPTT
-CL_B4_SLIDE=(--tbptt-k 100 --tbptt-s 25 --tbptt-b 10)     # batched sliding-window TBPTT
+CL_B1_SLIDE=(--tbptt-k 100 --tbptt-s 20 --tbptt-b 1)       # batch=1 sliding-window TBPTT
+CL_B5_NAIVE=(--tbptt-k 200 --tbptt-s 200 --tbptt-b 5)   # batched naive BPTT
+CL_B5_TBPTT=(--tbptt-k 100 --tbptt-s 100 --tbptt-b 5)     # batched TBPTT
+CL_B5_SLIDE=(--tbptt-k 100 --tbptt-s 20 --tbptt-b 5)     # batched sliding-window TBPTT
 EXP=fair_cmp
 
 # Open-loop training
@@ -68,11 +68,11 @@ python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B1_TBPTT[@]}" --
 
 python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B1_SLIDE[@]}" --seed-ic-eval 5212 --run-name "${EXP}_optcl_b1_slide"
 
-python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B4_NAIVE[@]}" --seed-ic-eval 5212 --run-name "${EXP}_optcl_b4_naive"&
+python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B5_NAIVE[@]}" --seed-ic-eval 5212 --run-name "${EXP}_optcl_b5_naive"&
 
-python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B4_TBPTT[@]}" --seed-ic-eval 5212 --run-name "${EXP}_optcl_b4_tbptt"&
+python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B5_TBPTT[@]}" --seed-ic-eval 5212 --run-name "${EXP}_optcl_b5_tbptt"&
 
-python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B4_SLIDE[@]}" --seed-ic-eval 5212 --run-name "${EXP}_optcl_b4_slide"
+python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B5_SLIDE[@]}" --seed-ic-eval 5212 --run-name "${EXP}_optcl_b5_slide"
 
 # Reproduce legacy open-loop static-field case (n_modes_time=1, n_modes_space=4)
 python main.py opt --num-ics 1 --seed-ic 10 --seed-ic-eval 10 --t1 20 --dt 0.1 --n-particles 40000 --n-mesh 256 --boxsize 31.4159265359 --n0 1 --vb 2.4 --vth 0.5 --open-n-modes-time 1 --open-n-modes-space 4 --open-init-scale 1e-4 --lr-start 1e-1 --lr-end 1e-1 --train-steps 200 --save-every 100 --train-seed 0 --eval-mult 2 --tbptt-b 1 --run-name legacy_opt_repro
@@ -86,7 +86,7 @@ python main.py zir "${TEST_COMMON[@]}" --run-name "${EXP}_test_opt_zir"
 python main.py load "${TEST_COMMON[@]}" --model-run "${EXP}_opt" --run-name "${EXP}_test_opt_load"
 
 # Compare each opt_cl variant vs resp/zir (same test IC)
-for RUN in optcl_b1_naive optcl_b1_tbptt optcl_b1_slide optcl_b4_naive optcl_b4_tbptt optcl_b4_slide; do
+for RUN in optcl_b1_naive optcl_b1_tbptt optcl_b1_slide optcl_b5_naive optcl_b5_tbptt optcl_b5_slide; do
   python main.py resp "${TEST_COMMON[@]}" --resp-amp 1.0 --run-name "${EXP}_test_${RUN}_resp"
   python main.py zir "${TEST_COMMON[@]}" --run-name "${EXP}_test_${RUN}_zir"
   python main.py load_cl "${TEST_COMMON[@]}" --model-run "${EXP}_${RUN}" --run-name "${EXP}_test_${RUN}_loadcl"
