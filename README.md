@@ -48,7 +48,7 @@ Example baseline (shared across all modes):
 ```bash
 # zsh-safe argument bundles (also works in bash)
 COMMON=(--seed-ic 1907 --t1 20 --dt 0.1 --n-particles 40000 --n-mesh 256 --boxsize 31.4159265359 --n0 1 --vb 2.4 --vth 0.5 --eval-mult 2)
-TRAIN_COMMON=(--train-steps 300 --save-every 100 --train-seed 0 --num-ics 10)
+TRAIN_COMMON=(--train-steps 300 --save-every 100 --train-seed 0 --num-ics 1)
 CL_B1_NAIVE=(--tbptt-k 200 --tbptt-s 200 --tbptt-b 1)    # batch=1 naive BPTT
 CL_B1_TBPTT=(--tbptt-k 100 --tbptt-s 100 --tbptt-b 1)      # batch=1 TBPTT
 CL_B1_SLIDE=(--tbptt-k 100 --tbptt-s 25 --tbptt-b 1)       # batch=1 sliding-window TBPTT
@@ -74,6 +74,9 @@ python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B4_TBPTT[@]}" --
 
 python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B4_SLIDE[@]}" --seed-ic-eval 5212 --run-name "${EXP}_optcl_b4_slide"
 
+# Reproduce legacy open-loop static-field case (n_modes_time=1, n_modes_space=4)
+python main.py opt --num-ics 1 --seed-ic 10 --seed-ic-eval 10 --t1 20 --dt 0.1 --n-particles 40000 --n-mesh 256 --boxsize 31.4159265359 --n0 1 --vb 2.4 --vth 0.5 --open-n-modes-time 1 --open-n-modes-space 4 --open-init-scale 1e-4 --lr-start 1e-1 --lr-end 1e-1 --train-steps 200 --save-every 100 --train-seed 0 --eval-mult 2 --tbptt-b 1 --run-name legacy_opt_repro
+
 # testing on one unseen random IC (same IC for all comparisons)
 TEST_COMMON=(--seed-ic 4211 --t1 20 --dt 0.1 --n-particles 40000 --n-mesh 256 --boxsize 31.4159265359 --n0 1 --vb 2.4 --vth 0.5 --eval-mult 2)
 
@@ -93,6 +96,7 @@ done
 Notes:
 
 - `--seed-ic-eval` controls the post-training evaluation IC for training modes.
+- In training modes (`opt`, `opt_cl`, `opt_cl_self`, `opt_cl_dis`), `--seed-ic` controls training IC generation and `--train-seed` is separate (optimizer seed only).
 - `--num-ics` controls how many random training ICs are pre-generated and cycled (default: `10`).
 - Every execution creates a unique run folder and writes `run_config.json`.
   - plots: `plots/<mode_group>/<run_id>/`

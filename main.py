@@ -429,11 +429,12 @@ def run_opt(args) -> None:
     cfg = apply_cfg_overrides(cfg, args)
     nh = cfg["N_particles"] // 2
     seed_ic = pick(args.seed_ic, 10)
-    n_modes_time = 2
-    n_modes_space = 10
+    n_modes_time = pick(args.open_n_modes_time, 2)
+    n_modes_space = pick(args.open_n_modes_space, 10)
+    open_init_scale = pick(args.open_init_scale, 1e-4)
     train_steps = pick(args.train_steps, 200)
     save_every = pick(args.save_every, 100)
-    train_seed = pick(args.train_seed, 0)
+    train_seed = pick(args.train_seed, seed_ic)
     num_ics = args.num_ics
     eval_mult = pick(args.eval_mult, 2.0)
     tbptt_k = args.tbptt_k
@@ -450,17 +451,15 @@ def run_opt(args) -> None:
         n_modes_time=n_modes_time,
         n_modes_space=n_modes_space,
         key=jax.random.PRNGKey(0),
-        init_scale=1e-4,
+        init_scale=open_init_scale,
         zero=False,
         closed_loop=False,
     )
 
-    y0 = pic.create_y0(jax.random.key(seed_ic))
     optimizer = Optimizer(
         pic=pic,
         model=e_control,
         K=None,
-        y0=y0,
         loss_metric=loss_metric,
         lr=lr_start / tbptt_b,
         lr_final=lr_end / tbptt_b,
@@ -471,7 +470,7 @@ def run_opt(args) -> None:
         num_ics=num_ics,
     )
     e_control, train_losses, _ = optimizer.train(
-        n_steps=train_steps, save_every=save_every, seed=train_seed, print_status=True
+        n_steps=train_steps, save_every=save_every, seed=train_seed, ic_seed=seed_ic, print_status=True
     )
 
     pic_eval = make_pic(cfg, eval_mult * cfg["t1"])
@@ -517,6 +516,11 @@ def run_opt(args) -> None:
             "lr_start": lr_start,
             "lr_end": lr_end,
         },
+        "model": {
+            "n_modes_time": n_modes_time,
+            "n_modes_space": n_modes_space,
+            "init_scale": open_init_scale,
+        },
         "eval": {"eval_mult": eval_mult, "seed_ic_eval": pick(args.seed_ic_eval, seed_ic)},
         "tbptt": {"K": tbptt_k, "S": tbptt_s, "B": tbptt_b},
         "outputs": {"plot_dir": str(plot_dir), "model_dir": str(model_dir), "checkpoint": checkpoint_path},
@@ -544,7 +548,7 @@ def run_opt_cl(args) -> None:
     seed_ic = pick(args.seed_ic, 10)
     train_steps = pick(args.train_steps, 200)
     save_every = pick(args.save_every, 100)
-    train_seed = pick(args.train_seed, 0)
+    train_seed = pick(args.train_seed, seed_ic)
     num_ics = args.num_ics
     eval_mult = pick(args.eval_mult, 2.0)
     tbptt_k = args.tbptt_k
@@ -569,12 +573,9 @@ def run_opt_cl(args) -> None:
         closed_loop=True,
         key=jax.random.PRNGKey(9),
     )
-    y0 = pic.create_y0(jax.random.key(seed_ic))
-
     optimizer = Optimizer(
         pic=pic,
         model=e_control,
-        y0=y0,
         loss_metric=loss_metric_density_modes,
         lr=lr_start / tbptt_b,
         lr_final=lr_end / tbptt_b,
@@ -585,7 +586,7 @@ def run_opt_cl(args) -> None:
         num_ics=num_ics,
     )
     e_control, train_losses, _ = optimizer.train(
-        n_steps=train_steps, save_every=save_every, seed=train_seed, print_status=True
+        n_steps=train_steps, save_every=save_every, seed=train_seed, ic_seed=seed_ic, print_status=True
     )
 
     pic_eval = make_pic(cfg, eval_mult * cfg["t1"])
@@ -665,7 +666,7 @@ def run_opt_cl_self(args) -> None:
     seed_ic = pick(args.seed_ic, 10)
     train_steps = pick(args.train_steps, 200)
     save_every = pick(args.save_every, 100)
-    train_seed = pick(args.train_seed, 0)
+    train_seed = pick(args.train_seed, seed_ic)
     num_ics = args.num_ics
     eval_mult = pick(args.eval_mult, 2.0)
     tbptt_k = args.tbptt_k
@@ -690,12 +691,9 @@ def run_opt_cl_self(args) -> None:
         closed_loop=True,
         key=jax.random.PRNGKey(9),
     )
-    y0 = pic.create_y0(jax.random.key(seed_ic))
-
     optimizer = Optimizer(
         pic=pic,
         model=e_control,
-        y0=y0,
         loss_metric=loss_metric_cancel_self_field,
         lr=lr_start / tbptt_b,
         lr_final=lr_end / tbptt_b,
@@ -706,7 +704,7 @@ def run_opt_cl_self(args) -> None:
         num_ics=num_ics,
     )
     e_control, train_losses, _ = optimizer.train(
-        n_steps=train_steps, save_every=save_every, seed=train_seed, print_status=True
+        n_steps=train_steps, save_every=save_every, seed=train_seed, ic_seed=seed_ic, print_status=True
     )
 
     pic_eval = make_pic(cfg, eval_mult * cfg["t1"])
@@ -954,7 +952,7 @@ def run_opt_cl_dis(args) -> None:
     n_modes_space_out = 10
     train_steps = pick(args.train_steps, 200)
     save_every = pick(args.save_every, 100)
-    train_seed = pick(args.train_seed, 0)
+    train_seed = pick(args.train_seed, seed_ic)
     num_ics = args.num_ics
     eval_mult = pick(args.eval_mult, 2.0)
     tbptt_k = args.tbptt_k
@@ -977,11 +975,9 @@ def run_opt_cl_dis(args) -> None:
         key=jax.random.PRNGKey(9),
     )
 
-    y0 = pic.create_y0(jax.random.key(seed_ic))
     optimizer = Optimizer(
         pic=pic,
         model=e_control,
-        y0=y0,
         loss_metric=loss_metric_stable,
         lr=lr_start / tbptt_b,
         lr_final=lr_end / tbptt_b,
@@ -992,7 +988,7 @@ def run_opt_cl_dis(args) -> None:
         num_ics=num_ics,
     )
     e_control, train_losses, _ = optimizer.train(
-        n_steps=train_steps, save_every=save_every, seed=train_seed, print_status=True
+        n_steps=train_steps, save_every=save_every, seed=train_seed, ic_seed=seed_ic, print_status=True
     )
 
     pic_eval = make_pic(cfg, eval_mult * cfg["t1"])
@@ -1126,6 +1122,24 @@ def parse_args(argv=None):
         type=float,
         default=None,
         help="Final learning rate at end of training.",
+    )
+    parser.add_argument(
+        "--open-n-modes-time",
+        type=int,
+        default=None,
+        help="Open-loop Fourier actuator trainable time rFFT modes (opt mode).",
+    )
+    parser.add_argument(
+        "--open-n-modes-space",
+        type=int,
+        default=None,
+        help="Open-loop Fourier actuator spatial Fourier modes (opt mode).",
+    )
+    parser.add_argument(
+        "--open-init-scale",
+        type=float,
+        default=None,
+        help="Open-loop Fourier actuator initialization scale (opt mode).",
     )
     parser.add_argument("--tbptt-k", type=int, default=None, help="TBPTT truncation length K.")
     parser.add_argument("--tbptt-s", type=int, default=None, help="TBPTT stride S (sliding uses S < K).")

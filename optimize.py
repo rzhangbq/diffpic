@@ -224,7 +224,7 @@ class Optimizer():
         model = eqx.apply_updates(model, updates)
         return loss, model, opt_state
 
-    def train(self, n_steps, save_every=100, seed=0, print_status=True):
+    def train(self, n_steps, save_every=100, seed=0, ic_seed=0, print_status=True):
         total_trajectories = int(n_steps)
         total_updates = int(np.ceil(total_trajectories / self.batch_size))
         self.optim = self._build_optimizer(total_updates=total_updates)
@@ -237,8 +237,14 @@ class Optimizer():
         train_losses = []
         valid_losses = []
 
-        ic_key = jax.random.PRNGKey(seed)
+        # `ic_seed` controls only the training initial-condition pool.
+        # `seed` is reserved for optimizer-side stochasticity.
+        _ = seed
+        ic_key = jax.random.PRNGKey(ic_seed)
         ic_keys = jax.random.split(ic_key, self.num_ics)
+        # Make IC generation seed-consistent:
+        # create_y0(PRNGKey(seed)) must match pool index 0 for any num_ics.
+        ic_keys = ic_keys.at[0].set(ic_key)
         y0_pool = jax.vmap(self.pic.create_y0)(ic_keys)
 
         trajectories_done = 0
@@ -250,7 +256,8 @@ class Optimizer():
                 print(f"Step: {step}")            
             start = time.time()
 
-            # Cycle deterministically through a fixed pool of ICs: ic#1 -> ic#num_ics -> repeat.
+            # Cycle deterministically through a fixed pool of ICs:
+            # ic#1 -> ic#num_ics -> repeat.
             start_idx = trajectories_done % self.num_ics
             ic_idx = (start_idx + jnp.arange(current_batch)) % self.num_ics
             if current_batch > 1:
