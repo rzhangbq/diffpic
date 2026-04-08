@@ -80,7 +80,11 @@ def scatter_animation(
     if save_path:
         # Requires ffmpeg installed
         os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
-        writer = FFMpegWriter(fps=fps, bitrate=-1)
+        writer = FFMpegWriter(
+                fps=fps,
+                codec="libvpx-vp9",   # or "libvpx-vp9"
+                bitrate=-1
+            )
         anim.save(save_path, writer=writer)
         print(f"Saved animation to {save_path}")
 
