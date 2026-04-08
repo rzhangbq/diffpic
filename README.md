@@ -52,17 +52,11 @@ TRAIN_COMMON=(--train-steps 5000 --save-every 500 --train-seed 0 --num-ics 100)
 CL_B1_NAIVE=(--tbptt-k 200 --tbptt-s 200 --tbptt-b 1)    # batch=1 naive BPTT
 CL_B1_TBPTT=(--tbptt-k 100 --tbptt-s 100 --tbptt-b 1)      # batch=1 TBPTT
 CL_B1_TBPTT_S=(--tbptt-k 50 --tbptt-s 50 --tbptt-b 1)      # batch=1 TBPTT_S
-CL_B1_TBPTT_SS=(--tbptt-k 25 --tbptt-s 25 --tbptt-b 1)      # batch=1 TBPTT_SS
 CL_B1_TBPTT_S_SLIDE=(--tbptt-k 50 --tbptt-s 40 --tbptt-b 1)      # batch=1 TBPTT_S_SLIDE
-CL_B1_TBPTT_SS_SLIDE=(--tbptt-k 25 --tbptt-s 15 --tbptt-b 1)      # batch=1 TBPTT_SS_SLIDE
-CL_B1_SLIDE=(--tbptt-k 100 --tbptt-s 20 --tbptt-b 1)       # batch=1 sliding-window TBPTT
 CL_B5_NAIVE=(--tbptt-k 200 --tbptt-s 200 --tbptt-b 5)   # batched naive BPTT
 CL_B5_TBPTT=(--tbptt-k 100 --tbptt-s 100 --tbptt-b 5)     # batched TBPTT
 CL_B5_TBPTT_S=(--tbptt-k 50 --tbptt-s 50 --tbptt-b 5)     # batched TBPTT_S
-CL_B5_TBPTT_SS=(--tbptt-k 25 --tbptt-s 25 --tbptt-b 5)     # batched TBPTT_SS
 CL_B5_TBPTT_S_SLIDE=(--tbptt-k 50 --tbptt-s 40 --tbptt-b 5)     # batched TBPTT_S_SLIDE
-CL_B5_TBPTT_SS_SLIDE=(--tbptt-k 25 --tbptt-s 15 --tbptt-b 5)     # batched TBPTT_SS_SLIDE
-CL_B5_SLIDE=(--tbptt-k 100 --tbptt-s 20 --tbptt-b 5)     # batched sliding-window TBPTT
 EXP=fair_cmp
 
 # Open-loop training
@@ -76,9 +70,7 @@ python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B1_TBPTT[@]}" --
 python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B1_TBPTT_S[@]}" --seed-ic-eval 2378 --run-name "${EXP}_optcl_b1_tbptt_s"&
 python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B1_TBPTT_SS[@]}" --seed-ic-eval 2378 --run-name "${EXP}_optcl_b1_tbptt_ss"&
 python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B1_TBPTT_S_SLIDE[@]}" --seed-ic-eval 2378 --run-name "${EXP}_optcl_b1_tbptt_s_slide"&
-python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B1_TBPTT_SS_SLIDE[@]}" --seed-ic-eval 2378 --run-name "${EXP}_optcl_b1_tbptt_ss_slide"&
 
-python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B1_SLIDE[@]}" --seed-ic-eval 2378 --run-name "${EXP}_optcl_b1_slide"&
 
 python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B5_NAIVE[@]}" --seed-ic-eval 2378 --run-name "${EXP}_optcl_b5_naive"&
 
@@ -86,9 +78,6 @@ python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B5_TBPTT[@]}" --
 python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B5_TBPTT_S[@]}" --seed-ic-eval 2378 --run-name "${EXP}_optcl_b5_tbptt_s"&
 python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B5_TBPTT_SS[@]}" --seed-ic-eval 2378 --run-name "${EXP}_optcl_b5_tbptt_ss"&
 python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B5_TBPTT_S_SLIDE[@]}" --seed-ic-eval 2378 --run-name "${EXP}_optcl_b5_tbptt_s_slide"&
-python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B5_TBPTT_SS_SLIDE[@]}" --seed-ic-eval 2378 --run-name "${EXP}_optcl_b5_tbptt_ss_slide"&
-
-python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B5_SLIDE[@]}" --seed-ic-eval 2378 --run-name "${EXP}_optcl_b5_slide"
 
 # Reproduce legacy open-loop static-field case (n_modes_time=1, n_modes_space=4)
 python main.py opt --num-ics 1 --seed-ic 10 --seed-ic-eval 10 --t1 20 --dt 0.1 --n-particles 40000 --n-mesh 256 --boxsize 31.4159265359 --n0 1 --vb 2.4 --vth 0.5 --open-n-modes-time 1 --open-n-modes-space 4 --open-init-scale 1e-4 --lr-start 1e-1 --lr-end 1e-1 --train-steps 200 --save-every 100 --train-seed 0 --eval-mult 2 --tbptt-b 1 --run-name legacy_opt_repro
