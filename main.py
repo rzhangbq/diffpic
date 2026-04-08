@@ -576,7 +576,7 @@ def run_opt_cl(args) -> None:
     optimizer = Optimizer(
         pic=pic,
         model=e_control,
-        loss_metric=loss_metric_density_modes,
+        loss_metric=loss_metric,
         lr=lr_start / tbptt_b,
         lr_final=lr_end / tbptt_b,
         save_dir=f"{model_dir}/",
