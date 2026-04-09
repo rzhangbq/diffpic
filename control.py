@@ -52,6 +52,7 @@ class FourierActuator(eqx.Module):
     # Optional closed-loop controller params (kept for compatibility with your design)
     K0: Optional[jax.Array] = eqx.field(static=True, default=None)
     u_max: Optional[jax.Array] = eqx.field(static=True, default=None)
+    e_ext_range: float = eqx.field(static=True, default=0.3)
 
     # Optional init metadata (not used in forward; useful to store)
     init_scale: float = eqx.field(static=True, default=0.0)
@@ -70,6 +71,7 @@ class FourierActuator(eqx.Module):
         closed_loop: bool = False,
         K0: Optional[jax.Array] = None,
         u_max: Optional[jax.Array] = None,
+        e_ext_range: float = 0.3,
     ):
         self.Nt = int(Nt)
         self.N_mesh = int(N_mesh)
@@ -82,6 +84,9 @@ class FourierActuator(eqx.Module):
         self.closed_loop = bool(closed_loop)
         self.K0 = K0
         self.u_max = u_max
+        self.e_ext_range = float(e_ext_range)
+        if self.e_ext_range <= 0.0:
+            raise ValueError("e_ext_range must be positive.")
         self.init_scale = float(init_scale)
 
         # Allocate trainable truncated time-rFFT coefficients
@@ -154,7 +159,7 @@ class FourierActuator(eqx.Module):
                 raise ValueError("closed_loop=True requires state x to be provided.")
             x_rom = x  # replace with ROM mapping
             u = -(self.K0 @ x_rom)
-            return jnp.tanh(u)
+            return self.e_ext_range * jnp.tanh(u / self.e_ext_range)
 
         # Open-loop: precompute full field and slice
         E_all = self.field()
@@ -211,6 +216,7 @@ class FourierActuator(eqx.Module):
                 # closed-loop extras (may be None)
                 "has_K0": self.K0 is not None,
                 "has_u_max": self.u_max is not None,
+                "e_ext_range": float(self.e_ext_range),
             }
             f.write((json.dumps(hyperparams) + "\n").encode())
             eqx.tree_serialise_leaves(f, self)
@@ -232,6 +238,7 @@ class FourierActuator(eqx.Module):
                 closed_loop=hyperparams["closed_loop"],
                 K0=None,     # overwritten if present in leaves
                 u_max=None,  # overwritten if present in leaves
+                e_ext_range=hyperparams.get("e_ext_range", 0.3),
             )
 
             return eqx.tree_deserialise_leaves(f, model)
