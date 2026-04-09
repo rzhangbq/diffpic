@@ -554,6 +554,7 @@ def run_opt_cl(args) -> None:
     tbptt_k = args.tbptt_k
     tbptt_s = args.tbptt_s
     tbptt_b = pick(args.tbptt_b, 4)
+    e_ext_range = pick(args.e_ext_range, 0.3)
     lr_start = pick(args.lr_start, 1e-2)
     lr_end = pick(args.lr_end, 2e-4)
     pic = make_pic(cfg, cfg["t1"])
@@ -568,6 +569,7 @@ def run_opt_cl(args) -> None:
         depth=2,
         init_scale=0.0,
         u_max=None,
+        e_ext_range=e_ext_range,
         include_dc=False,
         include_density_input=True,
         closed_loop=True,
@@ -672,6 +674,7 @@ def run_opt_cl_self(args) -> None:
     tbptt_k = args.tbptt_k
     tbptt_s = args.tbptt_s
     tbptt_b = pick(args.tbptt_b, 4)
+    e_ext_range = pick(args.e_ext_range, 0.3)
     lr_start = pick(args.lr_start, 1e-2)
     lr_end = pick(args.lr_end, 2e-4)
     pic = make_pic(cfg, cfg["t1"])
@@ -686,6 +689,7 @@ def run_opt_cl_self(args) -> None:
         depth=2,
         init_scale=0.0,
         u_max=None,
+        e_ext_range=e_ext_range,
         include_dc=False,
         include_density_input=True,
         closed_loop=True,
@@ -958,6 +962,7 @@ def run_opt_cl_dis(args) -> None:
     tbptt_k = args.tbptt_k
     tbptt_s = args.tbptt_s
     tbptt_b = pick(args.tbptt_b, 4)
+    e_ext_range = pick(args.e_ext_range, 0.3)
     lr_start = pick(args.lr_start, 1e-2)
     lr_end = pick(args.lr_end, 2e-4)
 
@@ -970,6 +975,7 @@ def run_opt_cl_dis(args) -> None:
         width=32,
         depth=2,
         u_max=None,
+        e_ext_range=e_ext_range,
         include_dc=False,
         closed_loop=True,
         key=jax.random.PRNGKey(9),
@@ -1144,6 +1150,12 @@ def parse_args(argv=None):
     parser.add_argument("--tbptt-k", type=int, default=None, help="TBPTT truncation length K.")
     parser.add_argument("--tbptt-s", type=int, default=None, help="TBPTT stride S (sliding uses S < K).")
     parser.add_argument("--tbptt-b", type=int, default=None, help="Trajectory batch size B per optimizer step.")
+    parser.add_argument(
+        "--e-ext-range",
+        type=float,
+        default=0.3,
+        help="Range limit for external field output: E_ext in [-range, range] via tanh scaling.",
+    )
     parser.add_argument("--num-ics", type=int, default=10, help="Number of random training ICs cycled during optimization.")
     parser.add_argument("--eval-mult", type=float, default=None, help="Multiplier for eval horizon vs t1.")
     parser.add_argument(

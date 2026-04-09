@@ -154,8 +154,7 @@ class FourierActuator(eqx.Module):
                 raise ValueError("closed_loop=True requires state x to be provided.")
             x_rom = x  # replace with ROM mapping
             u = -(self.K0 @ x_rom)
-            u = self.u_max * jnp.tanh(u / self.u_max)
-            return u
+            return jnp.tanh(u)
 
         # Open-loop: precompute full field and slice
         E_all = self.field()
@@ -255,6 +254,7 @@ class ModeFeedbackActuator(eqx.Module):
     include_dc: bool = eqx.field(static=True)
     include_density_input: bool = eqx.field(static=True)
     u_max: float | None = eqx.field(static=True)
+    e_ext_range: float = eqx.field(static=True)
 
     zero: bool = eqx.field(static=True)
     closed_loop: bool = eqx.field(static=True)
@@ -266,12 +266,15 @@ class ModeFeedbackActuator(eqx.Module):
     K0: jax.Array | None           # (n_out, n_in) complex64 if linear
     dc_value: jax.Array | None     # (1,) float if include_dc else None
 
-    def __init__(self,N_mesh,boxsize,use_linear=False,width=64,depth=2,include_dc=False,include_density_input=False,u_max=None,zero=False,closed_loop=True,n_modes_space_in=4,n_modes_space_out=4,init_scale=1.0,*,key):
+    def __init__(self,N_mesh,boxsize,use_linear=False,width=64,depth=2,include_dc=False,include_density_input=False,u_max=None,e_ext_range=0.3,zero=False,closed_loop=True,n_modes_space_in=4,n_modes_space_out=4,init_scale=1.0,*,key):
         self.N_mesh = N_mesh
         self.boxsize = boxsize
         self.include_dc = include_dc
         self.include_density_input = include_density_input
         self.u_max = u_max
+        self.e_ext_range = float(e_ext_range)
+        if self.e_ext_range <= 0.0:
+            raise ValueError("e_ext_range must be positive.")
         self.zero = zero
         self.closed_loop = closed_loop
         self.n_modes_space_in = n_modes_space_in
@@ -373,11 +376,6 @@ class ModeFeedbackActuator(eqx.Module):
             # Feedback in Fourier domain: u_m = -K * meas
             u_m = (-self.K0) @ meas
 
-            # Optional magnitude clipping (in complex plane)
-            if self.u_max is not None:
-                mag = jnp.abs(u_m)
-                u_m = jnp.where(mag > self.u_max, u_m * (self.u_max / (mag + 1e-12)), u_m)
-
             # Build one-sided spectrum for E_ext and invert to real space
             spec = jnp.zeros((self.N_mesh // 2 + 1,), dtype=jnp.complex64)
 
@@ -406,6 +404,7 @@ class ModeFeedbackActuator(eqx.Module):
                 spec = spec.at[1:self.n_modes_space_out+1].set(modes.astype(jnp.complex64))       
 
         E_ext = jnp.fft.irfft(spec, n=self.N_mesh).real  # -> real-valued (N_mesh,)
+        E_ext = self.e_ext_range * jnp.tanh(E_ext / self.e_ext_range)
         #jax.debug.print("Output: {out}", out=jnp.linalg.norm(E_ext))
         return E_ext
 
@@ -428,6 +427,7 @@ class ModeFeedbackActuator(eqx.Module):
                 "include_density_input": bool(self.include_density_input),
                 "use_linear": bool(self.use_linear),
                 "u_max": float(self.u_max) if self.u_max is not None else None,
+                "e_ext_range": float(self.e_ext_range),
             }
             f.write((json.dumps(hyperparams) + "\n").encode())
             eqx.tree_serialise_leaves(f, self)
@@ -448,6 +448,7 @@ class ModeFeedbackActuator(eqx.Module):
                 include_dc=hyperparams.get("include_dc", False),
                 include_density_input=hyperparams.get("include_density_input", False),
                 u_max=hyperparams.get("u_max", None),
+                e_ext_range=hyperparams.get("e_ext_range", 0.3),
                 zero=hyperparams.get("zero", False),
                 closed_loop=hyperparams.get("closed_loop", True),
                 n_modes_space_in=hyperparams.get("n_modes_space_in", 4),
@@ -473,6 +474,7 @@ class DissipativeModeFeedbackActuator(eqx.Module):
 
     include_dc: bool = eqx.field(static=True)
     u_max: float | None = eqx.field(static=True)
+    e_ext_range: float = eqx.field(static=True)
 
     zero: bool = eqx.field(static=True)
     closed_loop: bool = eqx.field(static=True)
@@ -491,6 +493,7 @@ class DissipativeModeFeedbackActuator(eqx.Module):
         depth=2,
         include_dc=False,
         u_max=None,
+        e_ext_range=0.3,
         zero=False,
         closed_loop=True,
         n_modes_space_in=4,
@@ -501,6 +504,9 @@ class DissipativeModeFeedbackActuator(eqx.Module):
         self.boxsize = float(boxsize)
         self.include_dc = bool(include_dc)
         self.u_max = u_max
+        self.e_ext_range = float(e_ext_range)
+        if self.e_ext_range <= 0.0:
+            raise ValueError("e_ext_range must be positive.")
         self.zero = bool(zero)
         self.closed_loop = bool(closed_loop)
         self.n_modes_space_in = int(n_modes_space_in)
@@ -600,13 +606,9 @@ class DissipativeModeFeedbackActuator(eqx.Module):
             Em = (alpha * Jm).astype(jnp.complex64)
             spec = spec.at[1 : 1 + self.n_modes_space_out].set(Em)
 
-        # Optional magnitude clipping in Fourier domain
-        if self.u_max is not None:
-            mag = jnp.abs(spec)
-            spec = jnp.where(mag > self.u_max, spec * (self.u_max / (mag + 1e-12)), spec)
-
         # Back to real space field
-        return jnp.fft.irfft(spec, n=self.N_mesh).real.astype(jnp.float64)
+        e_ext = jnp.fft.irfft(spec, n=self.N_mesh).real.astype(jnp.float64)
+        return self.e_ext_range * jnp.tanh(e_ext / self.e_ext_range)
 
     # -----------------------
     # Save / Load
@@ -624,6 +626,7 @@ class DissipativeModeFeedbackActuator(eqx.Module):
                 "n_modes_space_out": int(self.n_modes_space_out),
                 "include_dc": bool(self.include_dc),
                 "u_max": float(self.u_max) if self.u_max is not None else None,
+                "e_ext_range": float(self.e_ext_range),
             }
             f.write((json.dumps(hyperparams) + "\n").encode())
             eqx.tree_serialise_leaves(f, self)
@@ -642,6 +645,7 @@ class DissipativeModeFeedbackActuator(eqx.Module):
                 depth=hyperparams.get("depth", 2),
                 include_dc=hyperparams.get("include_dc", False),
                 u_max=hyperparams.get("u_max", None),
+                e_ext_range=hyperparams.get("e_ext_range", 0.3),
                 zero=hyperparams.get("zero", False),
                 closed_loop=hyperparams.get("closed_loop", True),
                 n_modes_space_in=hyperparams.get("n_modes_space_in", 4),
