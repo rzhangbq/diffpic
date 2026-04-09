@@ -72,7 +72,6 @@ python main.py opt_cl_ppo "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_PPO_B1[@]}" 
 
 python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B1_TBPTT[@]}" --seed-ic-eval 2378 --run-name "${EXP}_optcl_b1_tbptt"&
 python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B1_TBPTT_S[@]}" --seed-ic-eval 2378 --run-name "${EXP}_optcl_b1_tbptt_s"&
-python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B1_TBPTT_SS[@]}" --seed-ic-eval 2378 --run-name "${EXP}_optcl_b1_tbptt_ss"&
 python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B1_TBPTT_S_SLIDE[@]}" --seed-ic-eval 2378 --run-name "${EXP}_optcl_b1_tbptt_s_slide"&
 
 
@@ -80,7 +79,6 @@ python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B5_NAIVE[@]}" --
 
 python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B5_TBPTT[@]}" --seed-ic-eval 2378 --run-name "${EXP}_optcl_b5_tbptt"&
 python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B5_TBPTT_S[@]}" --seed-ic-eval 2378 --run-name "${EXP}_optcl_b5_tbptt_s"&
-python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B5_TBPTT_SS[@]}" --seed-ic-eval 2378 --run-name "${EXP}_optcl_b5_tbptt_ss"&
 python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B5_TBPTT_S_SLIDE[@]}" --seed-ic-eval 2378 --run-name "${EXP}_optcl_b5_tbptt_s_slide"&
 python main.py opt_cl_ppo "${COMMON[@]}" "${TRAIN_COMMON_UPD_EQ_B5[@]}" "${CL_PPO_B5[@]}" --seed-ic-eval 2378 --run-name "${EXP}_optcl_ppo_b5"&
 
