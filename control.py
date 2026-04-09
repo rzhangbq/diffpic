@@ -466,6 +466,203 @@ class ModeFeedbackActuator(eqx.Module):
 
             return eqx.tree_deserialise_leaves(f, model)
 
+
+class PPOModeFeedbackActuator(eqx.Module):
+    # Static hyperparameters
+    N_mesh: int = eqx.field(static=True)
+    boxsize: float = eqx.field(static=True)
+    n_modes_space_in: int = eqx.field(static=True)
+    n_modes_space_out: int = eqx.field(static=True)
+    width: int = eqx.field(static=True)
+    depth: int = eqx.field(static=True)
+    include_dc: bool = eqx.field(static=True)
+    include_density_input: bool = eqx.field(static=True)
+    e_ext_range: float = eqx.field(static=True)
+    zero: bool = eqx.field(static=True)
+    closed_loop: bool = eqx.field(static=True)
+
+    # Learnable params
+    policy_mlp: eqx.Module
+    value_mlp: eqx.Module
+    log_std: jax.Array
+
+    def __init__(
+        self,
+        N_mesh,
+        boxsize,
+        *,
+        width=64,
+        depth=2,
+        include_dc=False,
+        include_density_input=False,
+        zero=False,
+        closed_loop=True,
+        n_modes_space_in=4,
+        n_modes_space_out=4,
+        e_ext_range=0.3,
+        init_log_std=-1.0,
+        key,
+    ):
+        self.N_mesh = int(N_mesh)
+        self.boxsize = float(boxsize)
+        self.include_dc = bool(include_dc)
+        self.include_density_input = bool(include_density_input)
+        self.zero = bool(zero)
+        self.closed_loop = bool(closed_loop)
+        self.n_modes_space_in = int(n_modes_space_in)
+        self.n_modes_space_out = int(n_modes_space_out)
+        self.width = int(width)
+        self.depth = int(depth)
+        self.e_ext_range = float(e_ext_range)
+        if self.e_ext_range <= 0.0:
+            raise ValueError("e_ext_range must be positive.")
+
+        n_input_states = 2 if self.include_density_input else 1
+        in_size = n_input_states * (2 * self.n_modes_space_in + (1 if self.include_dc else 0))
+        action_dim = (1 if self.include_dc else 0) + 2 * self.n_modes_space_out
+
+        k1, k2 = jax.random.split(key, 2)
+        self.policy_mlp = eqx.nn.MLP(
+            in_size=in_size,
+            out_size=action_dim,
+            width_size=self.width,
+            depth=self.depth,
+            activation=jnn.tanh,
+            key=k1,
+        )
+        self.value_mlp = eqx.nn.MLP(
+            in_size=in_size,
+            out_size=1,
+            width_size=self.width,
+            depth=self.depth,
+            activation=jnn.tanh,
+            key=k2,
+        )
+        self.log_std = jnp.full((action_dim,), float(init_log_std), dtype=jnp.float64)
+
+    def _encode_observed_modes(self, spec):
+        s = spec[: self.n_modes_space_in + 1]
+        if self.include_dc:
+            return jnp.concatenate(
+                [
+                    jnp.array([jnp.real(s[0])], dtype=jnp.float64),
+                    jnp.real(s[1:]).astype(jnp.float64),
+                    jnp.imag(s[1:]).astype(jnp.float64),
+                ],
+                axis=0,
+            )
+        return jnp.concatenate(
+            [
+                jnp.real(s[1:]).astype(jnp.float64),
+                jnp.imag(s[1:]).astype(jnp.float64),
+            ],
+            axis=0,
+        )
+
+    def _encode_state(self, state):
+        rho_state = None
+        mom_state = state
+        if isinstance(state, tuple):
+            if len(state) != 2:
+                raise ValueError("If tuple state is provided, expected (density, first_moment).")
+            rho_state, mom_state = state
+        if mom_state is None:
+            raise ValueError("closed_loop actuator requires `state` input.")
+        if self.include_density_input and rho_state is None:
+            raise ValueError(
+                "include_density_input=True requires tuple state=(density_spectrum, first_moment_spectrum)."
+            )
+
+        x = self._encode_observed_modes(mom_state)
+        if self.include_density_input:
+            x = jnp.concatenate([self._encode_observed_modes(rho_state), x], axis=0)
+        return x
+
+    def _action_to_field(self, action_vec):
+        spec = jnp.zeros((self.N_mesh // 2 + 1,), dtype=jnp.complex64)
+        if self.include_dc:
+            dc = action_vec[0]
+            re = action_vec[1 : 1 + self.n_modes_space_out]
+            im = action_vec[1 + self.n_modes_space_out :]
+            spec = spec.at[0].set(jnp.asarray(dc, dtype=jnp.complex64))
+        else:
+            re = action_vec[: self.n_modes_space_out]
+            im = action_vec[self.n_modes_space_out :]
+        modes = re + 1j * im
+        spec = spec.at[1 : self.n_modes_space_out + 1].set(modes.astype(jnp.complex64))
+        e_ext = jnp.fft.irfft(spec, n=self.N_mesh).real.astype(jnp.float64)
+        return self.e_ext_range * jnp.tanh(e_ext / self.e_ext_range)
+
+    def _policy_stats(self, state):
+        x = self._encode_state(state)
+        mean = self.policy_mlp(x).astype(jnp.float64)
+        std = jnp.exp(self.log_std)
+        value = self.value_mlp(x).astype(jnp.float64)[0]
+        return mean, std, value
+
+    def value(self, state):
+        _, _, value = self._policy_stats(state)
+        return value
+
+    def act(self, state, key):
+        mean, std, value = self._policy_stats(state)
+        noise = jax.random.normal(key, mean.shape, dtype=mean.dtype)
+        action = mean + std * noise
+        logp = -0.5 * jnp.sum(((action - mean) / std) ** 2 + 2.0 * self.log_std + jnp.log(2.0 * jnp.pi))
+        e_ext = self._action_to_field(action)
+        return e_ext, action, logp, value
+
+    def evaluate_action(self, state, action):
+        mean, std, value = self._policy_stats(state)
+        logp = -0.5 * jnp.sum(((action - mean) / std) ** 2 + 2.0 * self.log_std + jnp.log(2.0 * jnp.pi))
+        entropy = jnp.sum(self.log_std + 0.5 * (1.0 + jnp.log(2.0 * jnp.pi)))
+        return logp, entropy, value
+
+    def __call__(self, n: int, *, state=None):
+        if self.zero:
+            return jnp.zeros((self.N_mesh,), dtype=jnp.float64)
+        mean, _, _ = self._policy_stats(state)
+        return self._action_to_field(mean)
+
+    def save_model(self, filename: str):
+        with open(filename, "wb") as f:
+            hyperparams = {
+                "zero": bool(self.zero),
+                "closed_loop": bool(self.closed_loop),
+                "N_mesh": int(self.N_mesh),
+                "boxsize": float(self.boxsize),
+                "width": int(self.width),
+                "depth": int(self.depth),
+                "n_modes_space_in": int(self.n_modes_space_in),
+                "n_modes_space_out": int(self.n_modes_space_out),
+                "include_dc": bool(self.include_dc),
+                "include_density_input": bool(self.include_density_input),
+                "e_ext_range": float(self.e_ext_range),
+            }
+            f.write((json.dumps(hyperparams) + "\n").encode())
+            eqx.tree_serialise_leaves(f, self)
+
+    @classmethod
+    def load_model(cls, filename: str):
+        with open(filename, "rb") as f:
+            hyperparams = json.loads(f.readline().decode())
+            model = cls(
+                N_mesh=hyperparams["N_mesh"],
+                boxsize=hyperparams["boxsize"],
+                width=hyperparams.get("width", 64),
+                depth=hyperparams.get("depth", 2),
+                include_dc=hyperparams.get("include_dc", False),
+                include_density_input=hyperparams.get("include_density_input", False),
+                e_ext_range=hyperparams.get("e_ext_range", 0.3),
+                zero=hyperparams.get("zero", False),
+                closed_loop=hyperparams.get("closed_loop", True),
+                n_modes_space_in=hyperparams.get("n_modes_space_in", 4),
+                n_modes_space_out=hyperparams.get("n_modes_space_out", 4),
+                key=jax.random.PRNGKey(0),
+            )
+            return eqx.tree_deserialise_leaves(f, model)
+
+
 class DissipativeModeFeedbackActuator(eqx.Module):
     # -------------------------
     # Static hyperparameters

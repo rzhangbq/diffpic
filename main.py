@@ -8,14 +8,14 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 
-from control import DissipativeModeFeedbackActuator, FourierActuator, ModeFeedbackActuator
+from control import DissipativeModeFeedbackActuator, FourierActuator, ModeFeedbackActuator, PPOModeFeedbackActuator
 from losses import (
     loss_metric,
     loss_metric_cancel_self_field,
     loss_metric_density_modes,
     loss_metric_stable,
 )
-from optimize import Optimizer
+from optimize import Optimizer, PPOTrainer
 from pic_simulation import PICSimulation
 from plotting import plot_modes, plot_pde_solution, scatter_animation
 
@@ -649,6 +649,134 @@ def run_opt_cl(args) -> None:
     write_run_config(model_dir, run_cfg)
 
 
+def run_opt_cl_ppo(args) -> None:
+    run_id = make_run_id("opt_cl_ppo", args)
+    plot_dir = prepare_run_dir("plots/trained_cl_ppo", run_id)
+    model_dir = prepare_run_dir("model_cl_ppo", run_id)
+    cfg = {
+        "N_particles": 100000,
+        "N_mesh": 400,
+        "t1": 30.0,
+        "dt": 0.1,
+        "boxsize": 10 * jnp.pi,
+        "n0": 1.0,
+        "vb": 2.4,
+        "vth": 0.5,
+    }
+    cfg = apply_cfg_overrides(cfg, args)
+    nh = cfg["N_particles"] // 2
+    seed_ic = pick(args.seed_ic, 10)
+    train_steps = pick(args.train_steps, 200)
+    save_every = pick(args.save_every, 100)
+    train_seed = pick(args.train_seed, seed_ic)
+    num_ics = args.num_ics
+    eval_mult = pick(args.eval_mult, 2.0)
+    e_ext_range = pick(args.e_ext_range, 0.3)
+    lr_start = pick(args.lr_start, 1e-2)
+    lr_end = pick(args.lr_end, 2e-4)
+
+    pic = make_pic(cfg, cfg["t1"])
+    e_control = PPOModeFeedbackActuator(
+        N_mesh=pic.N_mesh,
+        boxsize=pic.boxsize,
+        n_modes_space_in=10,
+        n_modes_space_out=10,
+        width=32,
+        depth=2,
+        include_dc=False,
+        include_density_input=True,
+        e_ext_range=e_ext_range,
+        closed_loop=True,
+        key=jax.random.PRNGKey(9),
+    )
+
+    optimizer = PPOTrainer(
+        pic=pic,
+        model=e_control,
+        lr=lr_start,
+        lr_final=lr_end,
+        save_dir=f"{model_dir}/",
+        num_ics=num_ics,
+        gamma=pick(args.ppo_gamma, 0.99),
+        gae_lambda=pick(args.ppo_gae_lambda, 0.95),
+        clip_eps=pick(args.ppo_clip_eps, 0.2),
+        vf_coef=pick(args.ppo_vf_coef, 0.5),
+        ent_coef=pick(args.ppo_ent_coef, 0.01),
+        ppo_epochs=pick(args.ppo_epochs, 4),
+    )
+    e_control, train_losses, ppo_logs = optimizer.train(
+        n_steps=train_steps, save_every=save_every, seed=train_seed, ic_seed=seed_ic, print_status=True
+    )
+
+    pic_eval = make_pic(cfg, eval_mult * cfg["t1"])
+    checkpoint_path = str(model_dir / "model_checkpoint_final")
+    e_control = PPOModeFeedbackActuator.load_model(checkpoint_path)
+    y0_eval = pic_eval.create_y0(jax.random.key(pick(args.seed_ic_eval, 1024)))
+    pic_eval = pic_eval.run_simulation(y0_eval, E_control=e_control)
+
+    e_control_vmappable = lambda n, rho_hat, mom_hat: e_control(n, state=(rho_hat, mom_hat))
+    u = jax.vmap(e_control_vmappable, in_axes=(0, 0, 0))(
+        jnp.arange(pic_eval.ts.shape[0]),
+        jnp.fft.rfft(pic_eval.rho),
+        jnp.fft.rfft(pic_eval.momentum),
+    )
+
+    state_modes = {
+        "rho": {"max_mode_spect": 100, "max_mode_time": 5, "num": 6},
+        "momentum": {"max_mode_spect": 100, "max_mode_time": 5, "num": 6},
+        "energy": {"max_mode_spect": 100, "max_mode_time": 5, "num": 6},
+    }
+    ext_modes = {"max_mode_spect": 10, "max_mode_time": 10, "num": 6}
+    save_common_plots(
+        pic_eval,
+        u,
+        boxsize=cfg["boxsize"],
+        nh=nh,
+        out_dir=str(plot_dir),
+        base_modes=state_modes,
+        with_external_modes=True,
+        external_modes=ext_modes,
+    )
+    save_time_series(
+        jnp.sum(pic_eval.energy + pic_eval.E_field**2, axis=-1),
+        pic_eval.ts,
+        str(plot_dir / "energy_evolution.png"),
+        ylabel="Energy",
+        title="Energy Evolution",
+    )
+    save_training_curve(train_losses, str(plot_dir / "train_losses.png"), use_log=True)
+
+    run_cfg = {
+        "mode": "opt_cl_ppo",
+        "run_id": run_id,
+        "args": vars(args),
+        "cfg": cfg,
+        "train": {
+            "train_steps": train_steps,
+            "save_every": save_every,
+            "train_seed": train_seed,
+            "num_ics": num_ics,
+            "lr_start": lr_start,
+            "lr_end": lr_end,
+            "ppo_gamma": pick(args.ppo_gamma, 0.99),
+            "ppo_gae_lambda": pick(args.ppo_gae_lambda, 0.95),
+            "ppo_clip_eps": pick(args.ppo_clip_eps, 0.2),
+            "ppo_vf_coef": pick(args.ppo_vf_coef, 0.5),
+            "ppo_ent_coef": pick(args.ppo_ent_coef, 0.01),
+            "ppo_epochs": pick(args.ppo_epochs, 4),
+        },
+        "eval": {"eval_mult": eval_mult, "seed_ic_eval": pick(args.seed_ic_eval, 1024)},
+        "outputs": {
+            "plot_dir": str(plot_dir),
+            "model_dir": str(model_dir),
+            "checkpoint": checkpoint_path,
+            "ppo_logs": {"last": ppo_logs[-1] if len(ppo_logs) > 0 else None},
+        },
+    }
+    write_run_config(plot_dir, run_cfg)
+    write_run_config(model_dir, run_cfg)
+
+
 def run_opt_cl_self(args) -> None:
     run_id = make_run_id("opt_cl_self", args)
     plot_dir = prepare_run_dir("plots/trained_cl_self", run_id)
@@ -1101,7 +1229,7 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Run PIC workflows from one entrypoint.")
     parser.add_argument(
         "mode",
-        choices=["resp", "opt", "opt_cl", "opt_cl_self", "load", "load_cl", "load_cl_dis", "opt_cl_dis", "zir"],
+        choices=["resp", "opt", "opt_cl", "opt_cl_ppo", "opt_cl_self", "load", "load_cl", "load_cl_dis", "opt_cl_dis", "zir"],
         help="Workflow to run.",
     )
     parser.add_argument("--n-particles", type=int, default=None, help="Override number of particles.")
@@ -1150,6 +1278,12 @@ def parse_args(argv=None):
     parser.add_argument("--tbptt-k", type=int, default=None, help="TBPTT truncation length K.")
     parser.add_argument("--tbptt-s", type=int, default=None, help="TBPTT stride S (sliding uses S < K).")
     parser.add_argument("--tbptt-b", type=int, default=None, help="Trajectory batch size B per optimizer step.")
+    parser.add_argument("--ppo-clip-eps", type=float, default=None, help="PPO clip epsilon.")
+    parser.add_argument("--ppo-gamma", type=float, default=None, help="PPO discount gamma.")
+    parser.add_argument("--ppo-gae-lambda", type=float, default=None, help="PPO GAE lambda.")
+    parser.add_argument("--ppo-vf-coef", type=float, default=None, help="PPO value-function loss weight.")
+    parser.add_argument("--ppo-ent-coef", type=float, default=None, help="PPO entropy bonus weight.")
+    parser.add_argument("--ppo-epochs", type=int, default=None, help="PPO policy epochs per rollout.")
     parser.add_argument(
         "--e-ext-range",
         type=float,
@@ -1189,6 +1323,8 @@ def main(argv=None):
         run_opt(args)
     elif args.mode == "opt_cl":
         run_opt_cl(args)
+    elif args.mode == "opt_cl_ppo":
+        run_opt_cl_ppo(args)
     elif args.mode == "opt_cl_self":
         run_opt_cl_self(args)
     elif args.mode == "load":

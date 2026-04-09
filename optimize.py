@@ -286,3 +286,190 @@ class Optimizer():
         self.model.save_model(checkpoint_name)
 
         return self.model, train_losses, valid_losses
+
+
+class PPOTrainer:
+    def __init__(
+        self,
+        pic,
+        model,
+        *,
+        lr=3e-4,
+        lr_final=None,
+        save_dir="model_cl_ppo/",
+        save_name="model_checkpoint",
+        num_ics=10,
+        gamma=0.99,
+        gae_lambda=0.95,
+        clip_eps=0.2,
+        vf_coef=0.5,
+        ent_coef=0.01,
+        ppo_epochs=4,
+    ):
+        self.pic = pic
+        self.model = model
+        self.base_lr = float(lr)
+        self.base_lr_final = float(lr_final) if lr_final is not None else None
+        self.save_dir = save_dir
+        self.save_name = save_name
+        self.num_ics = int(num_ics)
+        self.gamma = float(gamma)
+        self.gae_lambda = float(gae_lambda)
+        self.clip_eps = float(clip_eps)
+        self.vf_coef = float(vf_coef)
+        self.ent_coef = float(ent_coef)
+        self.ppo_epochs = int(ppo_epochs)
+        if self.num_ics < 1:
+            raise ValueError("num_ics must be >= 1.")
+        if self.ppo_epochs < 1:
+            raise ValueError("ppo_epochs must be >= 1.")
+
+    def _build_optimizer(self, total_updates):
+        if self.base_lr_final is None or total_updates <= 1:
+            return optax.adam(self.base_lr)
+        alpha = self.base_lr_final / self.base_lr
+        schedule = optax.cosine_decay_schedule(
+            init_value=self.base_lr,
+            decay_steps=max(int(total_updates) - 1, 1),
+            alpha=float(alpha),
+        )
+        return optax.adam(schedule)
+
+    def _reward_from_moments(self, moments):
+        rho = moments[:, 0]
+        rho_k = jnp.fft.rfft(rho.astype(jnp.float32))
+        dc = jnp.abs(rho_k[0]) ** 2 + 1e-12
+        mode_energy = jnp.sum(jnp.abs(rho_k[jnp.array([1, 2])]) ** 2)
+        return -(mode_energy / dc)
+
+    def _init_state(self, y0, key):
+        pos, vel = y0
+        pos = jnp.mod(pos, self.pic.boxsize)
+        moments, j, jp1, weight_j, weight_jp1 = self.pic.cic_deposition(pos, vel)
+        rho_hat = jnp.fft.rfft(moments[:, 0])
+        mom_hat = jnp.fft.rfft(moments[:, 1])
+        e_ext0, _, _, _ = self.model.act((rho_hat, mom_hat), key)
+        E_grid, _ = self.pic.poisson_solver(moments[:, 0])
+        E = self.pic.cic_gather((pos, vel, jnp.zeros_like(pos)), E_grid, j, jp1, weight_j, weight_jp1, E_ext=e_ext0)
+        acc = -self.pic.q * E / self.pic.m
+        return pos, vel, acc
+
+    def _rollout_episode(self, y0, key):
+        T = int(self.pic.n_steps)
+        pos, vel, acc = self._init_state(y0, key)
+        keys = jax.random.split(key, T + 1)
+
+        rho_hist = []
+        mom_hist = []
+        act_hist = []
+        logp_hist = []
+        value_hist = []
+        reward_hist = []
+
+        for n in range(T):
+            vel = vel + acc * self.pic.dt / 2.0
+            pos = jnp.mod(pos + vel * self.pic.dt, self.pic.boxsize)
+
+            moments, j, jp1, weight_j, weight_jp1 = self.pic.cic_deposition(pos, vel)
+            rho_hat = jnp.fft.rfft(moments[:, 0])
+            mom_hat = jnp.fft.rfft(moments[:, 1])
+
+            e_ext, action, logp, value = self.model.act((rho_hat, mom_hat), keys[n])
+            E_grid, _ = self.pic.poisson_solver(moments[:, 0])
+            E = self.pic.cic_gather((pos, vel, acc), E_grid, j, jp1, weight_j, weight_jp1, E_ext=e_ext)
+            acc = -self.pic.q * E / self.pic.m
+            vel = vel + acc * self.pic.dt / 2.0
+
+            reward = self._reward_from_moments(moments)
+            rho_hist.append(rho_hat)
+            mom_hist.append(mom_hat)
+            act_hist.append(action)
+            logp_hist.append(logp)
+            value_hist.append(value)
+            reward_hist.append(reward)
+
+        rho_hist = jnp.stack(rho_hist, axis=0)
+        mom_hist = jnp.stack(mom_hist, axis=0)
+        act_hist = jnp.stack(act_hist, axis=0)
+        logp_hist = jnp.stack(logp_hist, axis=0)
+        value_hist = jnp.stack(value_hist, axis=0)
+        reward_hist = jnp.stack(reward_hist, axis=0)
+        return (rho_hist, mom_hist), act_hist, logp_hist, value_hist, reward_hist
+
+    def _compute_advantages(self, rewards, values):
+        T = rewards.shape[0]
+        advantages = []
+        gae = 0.0
+        next_value = 0.0
+        for t in range(T - 1, -1, -1):
+            delta = rewards[t] + self.gamma * next_value - values[t]
+            gae = delta + self.gamma * self.gae_lambda * gae
+            advantages.append(gae)
+            next_value = values[t]
+        advantages = jnp.array(advantages[::-1], dtype=jnp.float64)
+        returns = advantages + values
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+        return advantages, returns
+
+    def _loss(self, model, obs, actions, old_logp, advantages, returns):
+        rho_hist, mom_hist = obs
+        logp, entropy, values = jax.vmap(model.evaluate_action, in_axes=((0, 0), 0))(
+            (rho_hist, mom_hist), actions
+        )
+        ratio = jnp.exp(logp - old_logp)
+        surr1 = ratio * advantages
+        surr2 = jnp.clip(ratio, 1.0 - self.clip_eps, 1.0 + self.clip_eps) * advantages
+        policy_loss = -jnp.mean(jnp.minimum(surr1, surr2))
+        value_loss = jnp.mean((returns - values) ** 2)
+        entropy_bonus = jnp.mean(entropy)
+        total = policy_loss + self.vf_coef * value_loss - self.ent_coef * entropy_bonus
+        return total, (policy_loss, value_loss, entropy_bonus)
+
+    def train(self, n_steps, save_every=100, seed=0, ic_seed=0, print_status=True):
+        total_updates = int(n_steps)
+        make_dir(self.save_dir)
+        self.optim = self._build_optimizer(total_updates)
+        opt_state = self.optim.init(eqx.filter(self.model, eqx.is_inexact_array))
+        grad_loss = eqx.filter_value_and_grad(self._loss, has_aux=True)
+
+        ic_key = jax.random.PRNGKey(ic_seed)
+        ic_keys = jax.random.split(ic_key, self.num_ics)
+        ic_keys = ic_keys.at[0].set(ic_key)
+        y0_pool = jax.vmap(self.pic.create_y0)(ic_keys)
+
+        train_losses = []
+        aux_logs = []
+        rng = jax.random.PRNGKey(seed)
+
+        for step in range(total_updates):
+            rng, rollout_key = jax.random.split(rng)
+            idx = step % self.num_ics
+            y0 = tuple(arr[idx] for arr in y0_pool)
+
+            obs, actions, old_logp, values, rewards = self._rollout_episode(y0, rollout_key)
+            advantages, returns = self._compute_advantages(rewards, values)
+
+            loss_value = None
+            aux_value = None
+            for _ in range(self.ppo_epochs):
+                (loss_value, aux_value), grads = grad_loss(self.model, obs, actions, old_logp, advantages, returns)
+                updates, opt_state = self.optim.update(grads, opt_state)
+                self.model = eqx.apply_updates(self.model, updates)
+
+            train_losses.append(float(loss_value))
+            aux_logs.append(tuple(float(x) for x in aux_value))
+
+            if print_status:
+                pol, val, ent = aux_value
+                print("--------------------")
+                print(f"Step: {step}")
+                print(f"Loss: {loss_value}")
+                print(f"Policy: {pol}, Value: {val}, Entropy: {ent}")
+
+            if step % save_every == 0 and step > 0 and step < total_updates - 1:
+                checkpoint_name = self.save_dir + self.save_name + f"_{step}"
+                self.model.save_model(checkpoint_name)
+
+        checkpoint_name = self.save_dir + self.save_name + "_final"
+        self.model.save_model(checkpoint_name)
+        return self.model, train_losses, aux_logs

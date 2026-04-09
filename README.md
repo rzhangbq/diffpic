@@ -49,10 +49,13 @@ Example baseline (shared across all modes):
 # zsh-safe argument bundles (also works in bash)
 COMMON=(--seed-ic 2312 --t1 20 --dt 0.1 --n-particles 40000 --n-mesh 256 --boxsize 31.4159265359 --n0 1 --vb 2.4 --vth 0.5 --eval-mult 2)
 TRAIN_COMMON=(--train-steps 5000 --save-every 500 --train-seed 0 --num-ics 100)
+TRAIN_COMMON_UPD_EQ_B5=(--train-steps 1000 --save-every 100 --train-seed 0 --num-ics 100) # 1 rollout/update, update-count matched to B5
 CL_B1_NAIVE=(--tbptt-k 200 --tbptt-s 200 --tbptt-b 1)    # batch=1 naive BPTT
 CL_B1_TBPTT=(--tbptt-k 100 --tbptt-s 100 --tbptt-b 1)      # batch=1 TBPTT
 CL_B1_TBPTT_S=(--tbptt-k 50 --tbptt-s 50 --tbptt-b 1)      # batch=1 TBPTT_S
 CL_B1_TBPTT_S_SLIDE=(--tbptt-k 50 --tbptt-s 40 --tbptt-b 1)      # batch=1 TBPTT_S_SLIDE
+CL_PPO_B1=(--ppo-clip-eps 0.2 --ppo-gamma 0.99 --ppo-gae-lambda 0.95 --ppo-vf-coef 0.5 --ppo-ent-coef 0.01 --ppo-epochs 4) # PPO comparable to B1 track
+CL_PPO_B5=(--ppo-clip-eps 0.2 --ppo-gamma 0.99 --ppo-gae-lambda 0.95 --ppo-vf-coef 0.5 --ppo-ent-coef 0.01 --ppo-epochs 4) # PPO comparable to B5 track
 CL_B5_NAIVE=(--tbptt-k 200 --tbptt-s 200 --tbptt-b 5)   # batched naive BPTT
 CL_B5_TBPTT=(--tbptt-k 100 --tbptt-s 100 --tbptt-b 5)     # batched TBPTT
 CL_B5_TBPTT_S=(--tbptt-k 50 --tbptt-s 50 --tbptt-b 5)     # batched TBPTT_S
@@ -65,6 +68,7 @@ python main.py opt "${COMMON[@]}" "${TRAIN_COMMON[@]}" --seed-ic-eval 2378 --run
 python main.py opt_cl_self "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B1_NAIVE[@]}" --seed-ic-eval 2378 --run-name "${EXP}_optcl_self_overfit"&
 # Closed-loop ablations: _cl under matched train budget
 python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B1_NAIVE[@]}" --seed-ic-eval 2378 --run-name "${EXP}_optcl_b1_naive"&
+python main.py opt_cl_ppo "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_PPO_B1[@]}" --seed-ic-eval 2378 --run-name "${EXP}_optcl_ppo_b1"&
 
 python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B1_TBPTT[@]}" --seed-ic-eval 2378 --run-name "${EXP}_optcl_b1_tbptt"&
 python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B1_TBPTT_S[@]}" --seed-ic-eval 2378 --run-name "${EXP}_optcl_b1_tbptt_s"&
@@ -78,6 +82,7 @@ python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B5_TBPTT[@]}" --
 python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B5_TBPTT_S[@]}" --seed-ic-eval 2378 --run-name "${EXP}_optcl_b5_tbptt_s"&
 python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B5_TBPTT_SS[@]}" --seed-ic-eval 2378 --run-name "${EXP}_optcl_b5_tbptt_ss"&
 python main.py opt_cl "${COMMON[@]}" "${TRAIN_COMMON[@]}" "${CL_B5_TBPTT_S_SLIDE[@]}" --seed-ic-eval 2378 --run-name "${EXP}_optcl_b5_tbptt_s_slide"&
+python main.py opt_cl_ppo "${COMMON[@]}" "${TRAIN_COMMON_UPD_EQ_B5[@]}" "${CL_PPO_B5[@]}" --seed-ic-eval 2378 --run-name "${EXP}_optcl_ppo_b5"&
 
 # Reproduce legacy open-loop static-field case (n_modes_time=1, n_modes_space=4)
 python main.py opt --num-ics 1 --seed-ic 10 --seed-ic-eval 10 --t1 20 --dt 0.1 --n-particles 40000 --n-mesh 256 --boxsize 31.4159265359 --n0 1 --vb 2.4 --vth 0.5 --open-n-modes-time 1 --open-n-modes-space 4 --open-init-scale 1e-4 --lr-start 1e-1 --lr-end 1e-1 --train-steps 200 --save-every 100 --train-seed 0 --eval-mult 2 --tbptt-b 1 --run-name legacy_opt_repro
